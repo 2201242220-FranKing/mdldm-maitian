@@ -128,11 +128,15 @@ async function submitOne() {
 async function run() {
   const dir = path.resolve(args[1] || '');
   if (!fs.existsSync(path.join(dir, 'publish.json'))) throw new Error(`${dir} 里没有 publish.json`);
+  const selected = opt('--only');
+  const only = selected ? selected.split(',') : null;
+  // 只读销售站不是发布目标，不需要调用发布助手校验。
+  if (only?.every(id => !canPublish(id))) { console.log('没有要跑的平台。'); return; }
   const v = await validateProject(dir);
   if (!v.ok) throw new Error(`校验没通过：\n${v.text.slice(-800)}`);
   const pj = loadProject(dir), ep = { id: pj.id, episode: pj.episode, name: pj.name, dir, schedule: pj.schedule || null };
   upsertEpisode(ep); saveSnapshot(ep.id, pj, true);
-  const only = opt('--only') ? opt('--only').split(',') : null, force = args.includes('--force');
+  const force = args.includes('--force');
   let todo = Object.keys(pj.platforms).filter(id => canPublish(id) && !pj.platforms[id].skip && (!only || only.includes(id)));
   // 停用的平台：直接标跳过，不参与这一轮
   const off = todo.filter(id => DISABLED.has(id));

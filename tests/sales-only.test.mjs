@@ -14,7 +14,7 @@ function fixture(t, provider = 'xiaoe') {
   fs.cpSync(path.join(root, 'src'), path.join(dir, 'src'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"module"}');
   fs.mkdirSync(path.join(dir, 'lib')); fs.writeFileSync(path.join(dir, 'lib/publish.js'), '');
-  fs.writeFileSync(path.join(dir, 'lib/bundle.js'), 'export const validate = () => ({ errors: [], warnings: [] }), PLATFORMS = {}, len = s => s.length;');
+  fs.writeFileSync(path.join(dir, 'lib/bundle.js'),     'export const validate = () => ({ errors: ["TEST_VALIDATION_REJECTED"], warnings: [] }), PLATFORMS = {}, len = s => s.length;');
   const calls = path.join(dir, 'calls.jsonl');
   const cfg = { site: { provider, name: '小鹅通', shopName: '示例店铺', base: 'https://admin.xiaoe-tech.com', adminPath: '/htht' },
     rootPath: dir, pluginDir: dir, batches: [['zsz']], auto: ['zsz'], manual: [], keepAlive: [] };
@@ -76,6 +76,28 @@ test('explicit zsz run cannot create an upload task', t => {
   const f = fixture(t), dir = project(f);
   const r = f.run('run', dir, '--only', 'zsz');
   assert.equal(r.status, 0, r.stderr); assert.deepEqual(tasks(f), []); assert.deepEqual(f.calls(), []);
+});
+test('explicit sales-only zsz does not need the publishing validator installed', t => {
+  const f = fixture(t), dir = project(f);
+  fs.rmSync(path.join(f.dir, 'lib/bundle.js'));
+  const r = f.run('run', dir, '--only', 'zsz');
+  assert.equal(r.status, 0, r.stderr); assert.deepEqual(tasks(f), []); assert.deepEqual(f.calls(), []);
+});
+test('run still validates the ordinary zsz publish target', t => {
+  const f = fixture(t, 'custom'), dir = project(f);
+  const r = f.run('run', dir, '--only', 'zsz');
+  assert.equal(r.status, 1); assert.match(r.stderr, /TEST_VALIDATION_REJECTED/);
+  assert.deepEqual(tasks(f), []); assert.deepEqual(f.calls(), []);
+});
+test('run still validates when a publishing target is selected alongside sales-only zsz', t => {
+  const f = fixture(t), dir = project(f);
+  const manifest = path.join(dir, 'publish.json');
+  const data = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  data.platforms.bilibili = { title: '视频' };
+  fs.writeFileSync(manifest, JSON.stringify(data));
+  const r = f.run('run', dir, '--only', 'zsz,bilibili');
+  assert.equal(r.status, 1); assert.match(r.stderr, /TEST_VALIDATION_REJECTED/);
+  assert.deepEqual(tasks(f), []); assert.deepEqual(f.calls(), []);
 });
 test('plan and adopt do not register zsz publication tasks', t => {
   const f = fixture(t), a = project(f, 'plan'), b = project(f, 'adopt');
