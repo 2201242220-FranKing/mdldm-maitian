@@ -3,11 +3,13 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initAccountTraffic } from './account-traffic.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DB_PATH = process.env.MAITIAN_DB || path.join(ROOT, 'data', 'hub.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
+initAccountTraffic(db);
 db.exec(`
 CREATE TABLE IF NOT EXISTS episodes (id TEXT PRIMARY KEY, episode INTEGER, name TEXT, dir TEXT, schedule TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS tasks (episode_id TEXT, platform TEXT, state TEXT, detail TEXT, url TEXT, tab_id INTEGER, updated_at TEXT, PRIMARY KEY (episode_id, platform));

@@ -57,8 +57,40 @@ const sec = (t, note = '') => `<div class="sec"><h2>${t}</h2><span class="note">
 const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>第 ${esc(x.episode)} 期 · ${when(x.schedule || x.createdAt).split(' ')[0]}</small></span></span>`;
 const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => s.episode_id === e.id && s.platform === p && s.views != null).map(s => [Date.parse(s.ts + ':00Z'), s.views]) })).filter(s => s.pts.length).sort((a, b) => b.pts[b.pts.length - 1][1] - a.pts[a.pts.length - 1][1]);
 let after = () => {};
+let trafficPage = 0, trafficSource = 'account', accountTraffic = null, trafficRequest = 0;
 
 function vTraffic() {
+  const hasAccounts = accountTraffic?.statuses?.length;
+  const hasProjects = O.episodes.some(e => e.views > 1);
+  const sources = hasAccounts && hasProjects ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-source="account" aria-pressed="${trafficSource === 'account'}">账号作品</button><button type="button" class="btn" data-traffic-source="projects" aria-pressed="${trafficSource === 'projects'}">发布工程</button></div>` : '';
+  if (hasAccounts && (trafficSource === 'account' || !hasProjects)) return sources + vAccountTraffic();
+  return sources + vProjectTraffic() + (accountTraffic?.error ? `<p class="note" role="status">账号流量暂不可用：${esc(accountTraffic.error)}</p>` : '');
+}
+
+function vAccountTraffic() {
+  const { accounts, videos, statuses, history, direct } = accountTraffic;
+  const name = id => accounts.find(a => a.id === id)?.name || id;
+  const platform = id => accounts.find(a => a.id === id)?.platform || id;
+  const pageCount = Math.max(1, Math.ceil(videos.length / 50));
+  trafficPage = Math.min(trafficPage, pageCount - 1);
+  const rows = videos.slice(trafficPage * 50, (trafficPage + 1) * 50);
+  const total = key => statuses.every(r => r.syncedAt) && videos.every(v => v[key] != null) ? sum(videos, key) : null;
+  const lines = accounts.map(({ id, platform, name }) => ({ platform, name, pts: history.filter(h => h.platform === id && h.views != null).map(h => [Date.parse(h.day + 'T12:00:00+08:00'), h.views]) })).filter(s => s.pts.length > 1);
+  after = () => { const el = $('#account-lines'); if (el) drawLines(el, lines); };
+  const button = (action, label, css = '') => `<button type="button" class="btn ${css}" data-account-action='${esc(JSON.stringify(action))}' ${action.type === 'metricsAccounts' && busy() ? 'disabled' : ''}>${esc(label)}</button>`;
+  const running = O.actions.some(a => a.type === 'metricsAccounts' && !a.done);
+  const last = O.actions.find(a => a.type === 'metricsAccounts' && a.done);
+  return `<div class="h1">流量</div><p class="lead">已发布的账号作品，与发布工程分开。失败时保留上次成功数据。</p>
+  <div class="btns traffic-switch">${button({type:'metricsAccounts'}, running ? '采集中…' : '采集账号流量', 'pri')}${abtn({type:'followers'}, '采集粉丝')}${last && !last.ok ? `<span role="status">${esc(last.tail.trim().split('\n').at(-1) || '采集失败')}</span>` : ''}</div>
+  <div class="grid g3">${tile('作品',fmt(videos.length))}${tile('累计播放',fmt(total('views')))}${tile('累计点赞',fmt(total('likes')))}</div>
+  ${sec('账号')}<div class="panel"><div class="tw"><table><thead><tr><th>账号</th><th class="n">作品</th><th>上次成功</th><th>采集结果</th><th></th></tr></thead><tbody>${statuses.map(st => `<tr><td>${logo(platform(st.id))}${esc(name(st.id))}</td><td class="n">${fmt(st.count)}</td><td>${when(st.syncedAt) || '未采集'}</td><td role="status">${esc(st.error || (st.syncedAt ? '已采集' : '未采集'))}</td><td>${direct && st.id.startsWith('bilibili@') ? button({ type:'metricsLogin', id:st.id }, '打开登录页') : ''}</td></tr>`).join('')}</tbody></table></div></div>
+  ${sec('作品')}<div class="panel"><div class="tw"><table><thead><tr><th>作品</th><th>账号</th><th>发布</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th></tr></thead><tbody>${rows.map(v => `<tr><td>${safeUrl(v.url) ? `<a href="${safeUrl(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>` : esc(v.title)}</td><td>${esc(name(v.platform))}</td><td>${when(v.publishedAt).split(' ')[0] || '–'}</td>${['views','likes','comments','favorites','shares'].map(k => `<td class="n">${fmt(v[k])}</td>`).join('')}</tr>`).join('') || '<tr><td colspan="8">还没有作品数据。</td></tr>'}</tbody></table></div></div>
+  ${pageCount > 1 ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-page="${trafficPage-1}" ${trafficPage === 0 ? 'disabled' : ''}>上一页</button><span>${trafficPage+1} / ${pageCount}</span><button type="button" class="btn" data-traffic-page="${trafficPage+1}" ${trafficPage === pageCount-1 ? 'disabled' : ''}>下一页</button></div>` : ''}
+  ${lines.length ? `${sec('累计播放走势')}<div class="panel"><div class="chartbox" id="account-lines"></div></div>` : ''}
+  ${sec('粉丝', '每天采一次')}<div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th class="n">现在</th><th class="n">今日</th><th class="n">近 7 天</th><th class="n">近 30 天</th></tr></thead><tbody>${PL.map(p => { const l = latest(p); return l ? `<tr><td>${logo(p)}${esc(PN[p])}</td><td class="n"><b>${fmt(l.total)}</b></td>${[1,7,30].map(n => `<td class="n">${gainN(p,n) == null ? '–' : sgn(gainN(p,n))}</td>`).join('')}</tr>` : ''; }).join('')}</tbody></table></div></div>`;
+}
+
+function vProjectTraffic() {
   const eps = O.episodes.filter(e => e.views > 1); if (!eps.length) return `<div class="h1">流量</div><p class="lead">还没采到流量。</p>${abtn({ type: 'metrics' }, '现在采一次', 'pri')}`;
   const all = sum(eps, 'views'), it = sum(eps, 'inter'), byP = PL.map(p => ({ p, v: eps.reduce((s, e) => s + ((M(e, p) || {}).views || 0), 0) })).sort((a, b) => b.v - a.v);
   const e = eps.find(x => x.id === pick) || eps[0], rows = PL.map(p => ({ p, m: M(e, p), t: e.tasks.find(t => t.platform === p) })).filter(r => r.m), mx = Math.max(...rows.map(r => r.m.views || 0), 1);
@@ -247,9 +279,33 @@ async function render() {
 async function load() {
   try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); PL = PL_ALL.filter(p => !off.has(p) && (O.siteOn || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
   catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
+  await refreshAccountTraffic();
+}
+async function refreshAccountTraffic() {
+  if (!O || (location.hash && location.hash !== '#/traffic')) return;
+  const id = ++trafficRequest;
+  const latest = await api('/api/account-traffic').catch(e => ({ error: e.message }));
+  if (id !== trafficRequest || (location.hash && location.hash !== '#/traffic')) return;
+  accountTraffic = latest;
+  await render();
 }
 function poll() { clearInterval(timer); timer = setInterval(async () => { await load(); if (!busy()) { clearInterval(timer); timer = null; } }, 4000); }
 document.addEventListener('click', async (e) => {
+  const ab = e.target.closest('[data-account-action]');
+  if (ab) {
+    ab.disabled = true;
+    try {
+      const r = await fetch('/api/account-traffic', { method:'POST', headers:{'content-type':'application/json'}, body:ab.dataset.accountAction });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast(j.error || '没成功'); return; }
+      toast('已开始，跑完会自动刷新');
+      await load(); poll();
+    } catch (err) { toast(err.message || '没成功'); }
+    finally { ab.disabled = false; }
+    return;
+  }
+  const ts = e.target.closest('[data-traffic-source]'); if (ts) { trafficSource = ts.dataset.trafficSource; await render(); return; }
+  const tp = e.target.closest('[data-traffic-page]'); if (tp) { trafficPage = Math.max(0, Number(tp.dataset.trafficPage) || 0); await render(); return; }
   const pk = e.target.closest('[data-pick]'); if (pk) { e.preventDefault(); pick = pk.dataset.pick; render(); return; }
   const fsb = e.target.closest('[data-fs]');
   if (fsb) {
@@ -321,7 +377,7 @@ document.addEventListener('change', async (e) => {
   if (r.ok) { I.site = j.site; paintSiteBody(); toast(j.site.enabled ? '已启用' : '已停用'); }
   else { toast(j.error || '没成功'); e.target.checked = !!itg().site.enabled; paintSiteBody(); }
 });
-addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
+addEventListener('hashchange', () => { if (!location.hash || location.hash === '#/traffic') load(); else render(); scrollTo(0, 0); });
 addEventListener('resize', () => after());
 load(); setInterval(() => { if (!timer && !document.hidden && !document.querySelector('details[open]')) load(); }, 60000);
 </script>
