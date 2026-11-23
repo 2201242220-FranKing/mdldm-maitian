@@ -81,9 +81,10 @@ test('traffic page renders useful empty/account/project states and safely escape
   assert.match(account,/&lt;副号>/);
   assert.match(account,/1 \/ 2/);
   assert.doesNotMatch(account,/&lt;作品>50/);
-  vm.runInContext("trafficPage=1; O.episodes=[{id:'example', views:2,inter:0, name:'a',nick:'a', tasks:[],covers:[]}] ; PL=['bilibili']",sandbox);
+  vm.runInContext("trafficSource='account'; trafficPage=1; O.episodes=[{id:'example', views:2,inter:0, name:'a',nick:'a', tasks:[],covers:[]}] ; PL=['bilibili']",sandbox);
   assert.match(render(),/&lt;作品>50/);
   assert.match(render(),/发布工程/);
   vm.runInContext("trafficSource='projects'",sandbox);
   assert.match(render(),/每期 × 平台/);
+  // 默认先看「发布工程」：两种数据都有时，默认视图是按期的流量
 });
