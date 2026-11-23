@@ -18,7 +18,7 @@ const nickOf = (name, pj) => (pj && pj.nick) || (short(name).split(/[，,？?！
 const latest = db.prepare('SELECT * FROM metrics WHERE episode_id=? AND platform=? ORDER BY day DESC LIMIT 1');
 const actions = [];   // 最近的操作（内存里）
 // 平台管理：登录状态、按平台打开登录页、停用/启用（停用写 config.disabled）
-const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram'];   // 知识站不是平台账号，不在这里
+const PLATFORMS = ['bilibili', 'douyin', 'xhs', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : [])];   // 知识站不是平台账号，不在这里
 const CFG = process.env.MAITIAN_CONFIG || path.join(ROOT, 'config.json');
 const platformList = () => PLATFORMS.map(id => ({ id, name: NAMES[id] || id, state: getMeta(`login:${id}`) || '', reason: getMeta(`loginReason:${id}`) || '', day: getMeta(`loginDay:${id}`) || '', disabled: (config.disabled || []).includes(id) }));
 
@@ -31,10 +31,40 @@ function episodeView(ep, full = false) {
     const p = pj.platforms[t.platform] || {};
     return { platform: t.platform, name: NAMES[t.platform] || t.platform, state: t.state, stateCn: STATE_CN[t.state] || t.state, detail: t.detail || '', url: t.url || '', updatedAt: t.updated_at,
       m: m && { day: m.day, views: m.views, likes: m.likes, comments: m.comments, favorites: m.favorites, shares: m.shares, extra: JSON.parse(m.extra || '{}') },
+      publishedAt: t.published_at || p.published_at || '', publishedTitle: t.published_title || p.published_title || '',
       ...(full ? { copy: { title: p.title || p.shortTitle || '', body: p.desc || p.body || p.text || p.description || '', tags: p.tags || p.topics || [], covers: p.covers || [] }, shot: fs.existsSync(path.join(ep.dir, '发布档案', `${t.platform}.jpg`)) } : {}) };
   });
-  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, createdAt: ep.created_at, dir: ep.dir,
-    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers: Object.keys(pj.covers || {}), durationSec: pj.durationSec || 0, tasks, views, inter };
+  // 封面缓存版本号：封面文件被替换（同 URL、新内容）时改 v，避免浏览器继续用旧的占位图
+  const covers = Object.keys(pj.covers || {});
+  let coverMtime = 0, coverSize = 0;
+  for (const k of covers) { try { const s = fs.statSync(path.join(ep.dir, pj.covers[k])); coverMtime = Math.max(coverMtime, Math.round(s.mtimeMs)); coverSize += s.size; } catch {} }
+  const coverVer = coverMtime ? Math.round(coverMtime / 1000).toString(36) + '-' + coverSize.toString(36) : '';
+  // 实际发布时间：取各平台 published_at 里最早的一个（北京时间），没有就退回计划时间。
+  // 视频号可能提前单独发布；保留平台原时间，整期优先按主平台定位。
+  // 它的时间照实记在 platforms.channels.published_at 里，但不参与这个锚点，否则整期会回退到前一天。
+  const MAIN_PLAT = ['douyin', 'bilibili', 'xhs', 'youtube', 'x', 'instagram', 'zsz'];
+  const when = (raw) => {
+    if (!raw) return NaN;
+    const s = String(raw);
+    const x = s.replace(' ', 'T');
+    return Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(x) ? x : x + (x.length === 16 ? ':00+08:00' : '+08:00'));
+  };
+  // 扩展平台可能隔天单独发布，不改变已有主平台的日期锚点。
+  // 否则整期会被拖到公众号那天，日历上就看不见四家真正发布的那一天。
+  const ANCHOR_PLAT = new Set([...MAIN_PLAT, 'channels']);
+  let firstPublish = 0, anyPublish = 0;
+  for (const [pid, p] of Object.entries(pj.platforms || {})) {
+    if (p.skip) continue;
+    const t = when((tasks.find(t => t.platform === pid) || {}).publishedAt || p.published_at);
+    if (!Number.isFinite(t)) continue;
+    if (ANCHOR_PLAT.has(pid) && (!anyPublish || t < anyPublish)) anyPublish = t;   // 兜底：只有视频号发过也照样定位
+    if (MAIN_PLAT.includes(pid) && (!firstPublish || t < firstPublish)) firstPublish = t;
+  }
+  const fallback = Object.entries(pj.platforms || {}).filter(([, p]) => !p.skip).map(([, p]) => when(p.published_at)).filter(Number.isFinite);
+  const publishMs = firstPublish || anyPublish || (fallback.length ? Math.min(...fallback) : 0);
+  const publishAt = publishMs ? new Date(publishMs).toISOString() : '';
+  const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, publishAt, createdAt: ep.created_at, dir: ep.dir,
+    campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers, coverVer, durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
     out.metrics = db.prepare('SELECT day, platform, views, likes, comments, favorites, shares FROM metrics WHERE episode_id=? ORDER BY day').all(ep.id);
@@ -155,6 +185,17 @@ async function handle(req, res) {
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
   }
+  if (u.pathname === '/api/bilibili-accounts') {
+    const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
+    if (req.method === 'GET') return send(res, 200, { bilibiliAccounts: bilibiliAccountView() });
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' }, undefined, { allow: 'GET, POST' });
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { error: '请发送 JSON' });
+    const a = await readJson(req);
+    try { return send(res, 200, saveBilibiliAccounts(a)); }
+    catch (e) {
+      return e instanceof InvalidBilibiliAccounts ? send(res, 400, { error: e.message }) : send(res, 500, { error: '保存 B 站账号失败' });
+    }
+  }
   if (u.pathname.startsWith('/static/')) { const f = path.join(DIR, 'web', path.basename(u.pathname)); if (!/\.(css|js|png)$/.test(f) || !fs.existsSync(f)) return send(res, 404, ''); return send(res, 200, fs.readFileSync(f), f.endsWith('.css') ? 'text/css; charset=utf-8' : f.endsWith('.png') ? 'image/png' : 'text/javascript; charset=utf-8'); }
   if (u.pathname === '/p') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'pages.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/board') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
@@ -168,7 +209,7 @@ async function handle(req, res) {
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
       site: { days: db.prepare('SELECT * FROM site_daily ORDER BY day').all(), channels: db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all(),
         campaigns: db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all(), campaignsOn: getMeta('siteCampaigns') === 'on' },
-      metrics: db.prepare('SELECT day, episode_id, platform, views FROM metrics ORDER BY day').all(),
+      metrics: db.prepare('SELECT day, episode_id, platform, views, likes, comments, favorites, shares FROM metrics ORDER BY day').all(),
       followers: db.prepare("SELECT day, platform, total, gain, loss, source FROM followers WHERE day >= date('now','localtime','-40 day') ORDER BY day").all(),
       samples: db.prepare('SELECT ts, episode_id, platform, views FROM samples ORDER BY ts').all(),
       feed: feed(), health: { nas: fs.existsSync(config.rootPath), chrome: await chromeUp(), metricsDay: getMeta('metricsDay') || '', doctorDay: getMeta('doctorDay') || '', platforms: platformList() }, now: new Date().toISOString() });
@@ -184,6 +225,42 @@ async function handle(req, res) {
     // 远程打开时原图（每张 ~700KB）太慢：默认给缩略图（长边 ≤ w，默认 720，JPEG），缓存在 data/thumbs；?full=1 给原图
     if (!u.searchParams.get('full') && !/\.svg$/.test(f)) { const t = thumb(f, Math.min(1600, +u.searchParams.get('w') || 720)); if (t) return send(res, 200, fs.readFileSync(t), 'image/jpeg', { 'cache-control': 'max-age=3600' }); }
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
+  }
+  // Account traffic stays separate from publishing and integration actions.
+  if (u.pathname === '/api/account-traffic') {
+    const { accountTargets } = await import('./account-targets.mjs');
+    let targets;
+    try { targets = accountTargets(JSON.parse(fs.readFileSync(CFG, 'utf8'))); }
+    catch { return send(res, 400, { error: '账号配置无效' }); }
+    const direct = (process.env.HUB_DRIVER || config.driver || 'direct') === 'direct';
+    if (req.method === 'GET') {
+      const { accountTrafficView } = await import('./account-traffic.mjs');
+      return send(res, 200, { ...accountTrafficView(db, targets.map(t => t.id)),
+        accounts: targets.map(({ id, platform, name, accountId }) => ({ id, platform, name, accountId })), direct });
+    }
+    if (req.method !== 'POST') return send(res, 405, { error: '不支持的请求方法' });
+    const origin = req.headers.origin;
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== `${protocol}://${req.headers.host}`)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    let a;
+    try { a = await readJson(req); } catch { return send(res, 400, { error: '请求格式不对' }); }
+    if (!a || (a.type !== 'metricsAccounts' && a.type !== 'metricsLogin')) return send(res, 400, { error: '不支持的操作' });
+    const login = a.type === 'metricsLogin';
+    const target = login && targets.find(t => t.platform === 'bilibili' && t.id === a.id);
+    if (login && (!direct || !target)) return send(res, 400, { error: '请在 direct 模式选择已启用的 B站账号' });
+    if (!login && actions.some(x => !x.done && x.type !== 'mark')) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
+    const rec = { type: a.type, label: login ? `打开账号登录页 · ${target.name}` : '采集账号作品', startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+    actions.push(rec);
+    while (actions.length > 32 && actions[0].done) actions.shift();
+    const args = login ? ['metrics-login', target.id] : ['metrics-accounts'];
+    const child = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...args], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
+    const output = data => { rec.tail = (rec.tail + data).slice(-600); };
+    child.stdout.on('data', output);
+    child.stderr.on('data', output);
+    const finish = ok => { rec.done = true; rec.ok = ok; rec.endedAt = new Date().toISOString(); };
+    child.on('error', error => { output(error.message); finish(false); });
+    child.on('close', code => finish(code === 0));
+    return send(res, 200, { ok: true });
   }
   if (u.pathname === '/api/integrations' && req.method === 'GET') return send(res, 200, integrations());
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {

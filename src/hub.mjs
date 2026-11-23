@@ -9,6 +9,7 @@
 //   hub submit <id> <instagram|youtube|x>      中控卡住时，把已填好的发帖页单独提交一次（先查重）
 //   hub adopt <工程目录>                         登记一期已发过的（不上传）
 //   hub metrics [id]                            采集流量并发日报
+//   hub metrics-login <bilibili[@账号]>         打开指定 B站账号的流量浏览器
 //   hub daemon                                  常驻：到点自动取链接、提醒还没点发布的平台
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto'; import { execFileSync, spawn } from 'node:child_process';
 import { db, NAMES, LOCKED, STATE_CN, upsertEpisode, getTask, getTasks, setTask, log, episodes, getEpisode, recentLogs, getMeta, setMeta, saveMetric, prevMetric, saveSnapshot } from './db.mjs';
@@ -38,14 +39,32 @@ const ZSZ_LEAD = 30;   // 知识站建课提前量（分钟）：上传 + 转码
 const strip = (s) => String(s || '').replace(/ *\d+%/, '');
 const mapState = (s) => s === '待你发布' || s === '已填写' ? 'filled' : s === '异常' || s === '上传超时' ? 'failed' : s === '未登录' ? 'not_logged_in' : s === '已停止' ? 'stopped' : s === '跳过' ? 'skipped' : 'running';
 const loadProject = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'publish.json'), 'utf8'));
+// 平台回传的发布时间：数字是毫秒/秒时间戳，字符串是「2026-11-19 09:00」或「2026年11月19日 09:00」
+function bjTime(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const s0 = String(v);
+  if (/^(\d{10}|\d{13})$/.test(s0)) {
+    const ms = s0.length === 13 ? Number(s0) : Number(s0) * 1000;
+    return new Date(ms + 8 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+  }
+  if (/T/.test(s0) && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(s0)) {
+    const ms = Date.parse(s0);
+    return Number.isFinite(ms) ? new Date(ms + 8 * 3600e3).toISOString().slice(0, 19).replace('T', ' ') : '';
+  }
+  const m = s0.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return '';
+  const p2 = (x) => String(x).padStart(2, '0');
+  return `${m[1]}-${p2(m[2])}-${p2(m[3])} ${p2(m[4])}:${m[5]}:${m[6] || '00'}`;
+}
+// 每家平台各自记一份真实发布时间，取链接时顺手写回工程与快照
 const projectOf = (ep, pj) => ({ dir: path.relative(config.rootPath, ep.dir), data: pj });
 // 停用的平台：config.disabled（系统页里开关）。从登录、体检、保活、发布、采粉丝里都去掉
 // 每次现读 config.disabled：网页「系统 → 平台」改的是同一个 config 对象，守护进程不用重启就生效
 export const DISABLED = { has: (id) => (config.disabled || []).includes(id) };
-const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', 'zsz'];
+const ALL_IDS = ['bilibili', 'xhs', 'douyin', 'channels', 'youtube', 'x', 'instagram', ...(config.batches?.flat().includes('wechat') ? ['wechat'] : []), 'zsz'];
 // 每次都重算：知识站可能在系统页停用（SITE 热更新），停用的平台由 config.disabled 决定
 const ALL = () => ALL_IDS.filter(id => (id !== 'zsz' || SITE) && !DISABLED.has(id));   // 没配自有站点就不管 zsz；停用的不管
-const LOGIN_PAGES = { bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', get zsz() { return SITE ? SITE.admin : ''; } };
+const LOGIN_PAGES = { wechat: 'https://mp.weixin.qq.com/', bilibili: 'https://member.bilibili.com/platform/upload/video/frame', xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&target=video', douyin: 'https://creator.douyin.com/creator-micro/content/upload', channels: 'https://channels.weixin.qq.com/platform/post/create', youtube: 'https://studio.youtube.com/', x: 'https://x.com/home', instagram: 'https://www.instagram.com/', get zsz() { return SITE ? SITE.admin : ''; } };
 
 function table(eid) {
   return getTasks(eid).map(t => `${NAMES[t.platform] || t.platform}：${STATE_CN[t.state] || t.state}${t.detail ? `（${t.detail.slice(0, 80)}）` : ''}${t.url ? ` ${t.url}` : ''}`).join('\n');
@@ -221,10 +240,17 @@ async function sync(ep, ids, quiet = false) {
   ids = (ids || Object.keys(pj.platforms)).filter(i => pj.platforms[i] && !pj.platforms[i].skip);
   const before = table(ep.id);
   const r = await drv.links(projectOf(ep, pj), ids);
+  let touchedPlat = false;
   for (const [id, v] of Object.entries(r)) {
     const state = /定时|审核|转码/.test(v.status || '') ? 'scheduled' : v.url || /已发布|已上线/.test(v.status || '') ? 'published' : null;
+    const bjt = bjTime(v.time);
+    if (bjt && pj.platforms[id] && /已发布|已上线|定时|审核/.test(v.status || '')) {
+      pj.platforms[id].published_at = bjt;
+      pj.platforms[id].published_title = pj.platforms[id].published_title || pj.platforms[id].title || pj.platforms[id].shortTitle || '';
+      touchedPlat = true;
+    }
     log(ep.id, id, 'links', JSON.stringify(v));
-    if (state) setTask(ep.id, id, state, [v.status, v.note].filter(Boolean).join('，'), { url: v.url || undefined });
+    if (state) setTask(ep.id, id, state, [v.status, v.note].filter(Boolean).join('，'), { url: v.url || undefined, publishedAt: bjt || undefined, publishedTitle: pj.platforms[id] && pj.platforms[id].published_title });
     // 平台实际记录的定时和计划不一致就报警（视频号第 36 期 15:00、第 37 期 22:00、第 4 期 20:00 都被改过）
     if (state === 'scheduled' && pj.schedule && v.time) {
       let t = typeof v.time === 'number' ? v.time : NaN;
@@ -234,6 +260,10 @@ async function sync(ep, ids, quiet = false) {
         await notify(`⚠️ ${ep.name}\n${NAMES[id]}平台上记录的定时是 ${new Date(t + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' ')}，计划是 ${pj.schedule.slice(0, 16).replace('T', ' ')}，请去作品管理改`);
       }
     }
+  }
+  if (touchedPlat) {
+    try { fs.writeFileSync(path.join(ep.dir, 'publish.json'), JSON.stringify(pj, null, 2) + '\n'); } catch (e) { console.error('发布时间没写回工程：' + e.message); }
+    saveSnapshot(ep.id, pj, true);
   }
   const tasks = getTasks(ep.id);
   try { fs.writeFileSync(path.join(ep.dir, '发布记录.json'), JSON.stringify({ updatedAt: new Date().toISOString(), platforms: Object.fromEntries(tasks.map(t => [t.platform, { name: NAMES[t.platform], state: STATE_CN[t.state] || t.state, url: t.url || '', detail: t.detail || '' }])) }, null, 2) + '\n'); } catch (e) { console.error('发布记录没写进 NAS：' + e.message); }
@@ -272,7 +302,21 @@ async function collectMetrics(ep) {
   if (!lines.length) return null;
   return `【${ep.episode ? ep.episode + ' 期 ' : ''}${ep.name.split(/[｜|]/)[0]}】${any ? `全平台播放 ${total}${totalDelta ? `（较上次 +${totalDelta}）` : ''}` : ''}\n${lines.join('\n')}`;
 }
-async function metricsReport(list) {
+async function accountMetricsReport() {
+  try {
+    const { collectTraffic } = await import('./account-collect.mjs');
+    const results = await collectTraffic(SKIP_METRICS);
+    for (const r of results) console.log(`${r.name}：${r.error ? '采集失败：' + r.error : '已采集 ' + r.count + ' 个作品'}`);
+    if (!results.length) console.log('没有启用的可采集账号');
+    if (results.some(r => r.error)) throw new Error('部分账号采集失败，请查看流量页');
+  } catch (e) { throw Object.assign(e, { quiet: true }); }
+}
+async function metricsReport(list, { accounts = true } = {}) {
+  // 账号作品的每日采集需单独启用；失败不能阻断旧工程日报。
+  if (accounts && config.accountTrafficAuto === true) {
+    try { await accountMetricsReport(); }
+    catch (e) { console.error('账号作品采集失败：' + e.message); }
+  }
   const parts = [];
   for (const ep of list) { const r = await collectMetrics(ep).catch((e) => `【${ep.name}】采集出错：${e.message}`); if (r) parts.push(r); }
   // 粉丝：每天一次，和流量一起采
@@ -468,7 +512,7 @@ try {
     const t = R.reviewText(R.review(ep, +(args[2] && !args[2].startsWith('--') ? args[2] : 1))); console.log(t); if (args.includes('--notify')) await notify(t);
   }
   else if (cmd === 'weekly') { const R = await import('./review.mjs'); const w = R.weekly(); console.log(w.text); if (args.includes('--notify')) await notify(w.text); }
-  else if (cmd === 'metrics') { if (opt('--skip')) SKIP_METRICS = opt('--skip').split(','); const list = args[1] && !args[1].startsWith('--') ? [getEpisode(args[1])].filter(Boolean) : episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3); await metricsReport(list); }
+  else if (cmd === 'metrics') { if (opt('--skip')) SKIP_METRICS = opt('--skip').split(','); const id = args[1] && !args[1].startsWith('--') ? args[1] : null; const list = id ? [getEpisode(id)].filter(Boolean) : episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3); await metricsReport(list, { accounts: !id }); }
   else if (cmd === 'plan') {   // 只登记、不上传：大屏「分发计划」里先看到这一期
     if (args[1] && !args[1].startsWith('--')) { const r = planDir(path.resolve(args[1])); console.log(r ? `已登记计划：${r}` : '这一期已经登记过了'); }
     else { const n = scanPlans(); console.log(`扫描完成，新登记 ${n.length} 期${n.length ? '：' + n.join('、') : ''}`); }
@@ -488,6 +532,15 @@ try {
     if (needStore) console.log(`第一步：在专用 Chrome 里的应用商店页面点「添加至 Chrome」，装上麦田发布助手（之后 Chrome 会自动更新它）`);
     console.log(`专用 Chrome 已打开 ${ids.length} 个平台页面，登录完运行 hub doctor 检查`);
   }
+  else if (cmd === 'metrics-accounts') { SKIP_METRICS = (opt('--skip') || '').split(','); await accountMetricsReport(); }
+  else if (cmd === 'metrics-login') {
+    const { currentAccountTargets } = await import('./account-collect.mjs');
+    const target = currentAccountTargets().find(t => t.id === args[1] && t.platform === 'bilibili');
+    if (!target) throw Object.assign(new Error('请选择已启用的 B站账号'), { quiet: true });
+    try { await drv.openTrafficLogin(target); }
+    catch (e) { throw Object.assign(e, { quiet: true }); }
+    console.log(`${target.name}：请在专用 Chrome 登录，随后运行 hub metrics`);
+  }
   else if (cmd === 'followers') { await drv.ensure(); console.log(JSON.stringify(await collectFollowers(opt('--only') ? opt('--only').split(',') : null, opt('--skip') ? opt('--skip').split(',') : []), null, 1)); }
   else if (cmd === 'daemon') await daemon();
   else if (cmd === 'web') { const { startWeb } = await import('./web.mjs'); startWeb(); await new Promise(() => {}); }
@@ -497,6 +550,6 @@ try {
     for (const e of list) { console.log(`\n【${e.id}】${e.name}  定时 ${e.schedule || '立即'}\n${table(e.id)}`); if (args.includes('--logs')) console.log(recentLogs(e.id).map(l => `  ${l.ts.slice(11, 19)} ${l.platform} ${l.action} ${l.result}`).join('\n')); }
   } else if (cmd === 'mark') { setTask(args[1], args[2], args[3], (args[4] && !args[4].startsWith('--') ? args[4] : '人工标记'), { url: opt('--url') || undefined }); log(args[1], args[2], 'mark', args[3]); console.log(table(args[1])); }
   else if (cmd === 'notify-test') await notify('发布中控已接通 ✅');
-  else console.log('用法：hub login [--only a,b] | doctor [--only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
+  else console.log('用法：hub login [--only a,b] | doctor [--only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | metrics-accounts [--skip a,b] | metrics-login <bilibili[@账号]> | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
 } catch (e) { console.error('出错：' + e.message); if (!e.quiet) await notify(`❌ 发布中控出错：${e.message.slice(0, 300)}${helpTip()}`); code = 1; }
 await drv.close(); db.close(); process.exit(code);
