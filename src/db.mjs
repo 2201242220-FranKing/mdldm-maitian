@@ -3,11 +3,13 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initAccountTraffic } from './account-traffic.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DB_PATH = process.env.MAITIAN_DB || path.join(ROOT, 'data', 'hub.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
+initAccountTraffic(db);
 db.exec(`
 CREATE TABLE IF NOT EXISTS episodes (id TEXT PRIMARY KEY, episode INTEGER, name TEXT, dir TEXT, schedule TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS tasks (episode_id TEXT, platform TEXT, state TEXT, detail TEXT, url TEXT, tab_id INTEGER, updated_at TEXT, PRIMARY KEY (episode_id, platform));
@@ -27,8 +29,13 @@ const siteColumns = new Set(db.prepare('PRAGMA table_info(site_daily)').all().ma
 for (const [name, type] of [['refund', 'REAL'], ['paid_users', 'INTEGER'], ['visitors', 'INTEGER']]) {
   if (!siteColumns.has(name)) db.exec(`ALTER TABLE site_daily ADD COLUMN ${name} ${type}`);
 }
+// 老库补列：每家平台的真实发布时间与当时标题（per-platform 标记）
+const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
+for (const name of ['published_at', 'published_title']) {
+  if (!taskColumns.has(name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${name} TEXT`);
+}
 const now = () => new Date().toISOString();
-export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', zsz: '知识站' };
+export const NAMES = { bilibili: 'B站', xhs: '小红书', douyin: '抖音', channels: '视频号', youtube: 'YouTube', x: 'X', instagram: 'Instagram', wechat: '公众号', zsz: '知识站' };
 // 已经到位、不允许再跑的状态（防重）
 export const LOCKED = ['filled', 'awaiting_user', 'scheduled', 'published'];
 export const STATE_CN = { planned: '计划中', pending: '等待', running: '进行中', filled: '已填好', awaiting_user: '待你点发布', scheduled: '已定时', published: '已发布', failed: '异常', not_logged_in: '未登录', stopped: '已停止', skipped: '跳过' };
@@ -44,9 +51,9 @@ export const getEpisode = (id) => db.prepare('SELECT * FROM episodes WHERE id=?'
 // 返回 true 表示状态真的变了
 export function setTask(eid, p, state, detail = '', extra = {}) {
   const old = getTask(eid, p);
-  db.prepare(`INSERT INTO tasks (episode_id, platform, state, detail, url, tab_id, updated_at) VALUES (?,?,?,?,?,?,?)
-    ON CONFLICT(episode_id, platform) DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url, tasks.url), tab_id=COALESCE(excluded.tab_id, tasks.tab_id), updated_at=excluded.updated_at`)
-    .run(eid, p, state, detail, extra.url ?? null, extra.tabId ?? null, now());
+  db.prepare(`INSERT INTO tasks (episode_id, platform, state, detail, url, tab_id, updated_at, published_at, published_title) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(episode_id, platform) DO UPDATE SET state=excluded.state, detail=excluded.detail, url=COALESCE(excluded.url, tasks.url), tab_id=COALESCE(excluded.tab_id, tasks.tab_id), updated_at=excluded.updated_at, published_at=COALESCE(excluded.published_at, tasks.published_at), published_title=COALESCE(excluded.published_title, tasks.published_title)`)
+    .run(eid, p, state, detail, extra.url ?? null, extra.tabId ?? null, now(), extra.publishedAt ?? null, extra.publishedTitle ?? null);
   return !old || old.state !== state || old.detail !== detail;
 }
 export function log(eid, p, action, result = '') {

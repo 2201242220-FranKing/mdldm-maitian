@@ -17,7 +17,7 @@ function fixture(t, provider = 'xiaoe') {
   fs.writeFileSync(path.join(dir, 'lib/bundle.js'),     'export const validate = () => ({ errors: ["TEST_VALIDATION_REJECTED"], warnings: [] }), PLATFORMS = {}, len = s => s.length;');
   const calls = path.join(dir, 'calls.jsonl');
   const cfg = { site: { provider, name: '小鹅通', shopName: '示例店铺', base: 'https://admin.xiaoe-tech.com', adminPath: '/htht' },
-    rootPath: dir, pluginDir: dir, batches: [['zsz']], auto: ['zsz'], manual: [], keepAlive: [] };
+    rootPath: dir, pluginDir: dir, chromeProfile: path.join(dir, 'chrome-profile'), batches: [['zsz']], auto: ['zsz'], manual: [], keepAlive: [] };
   const config = path.join(dir, 'config.json'); fs.writeFileSync(config, JSON.stringify(cfg));
   fs.writeFileSync(path.join(dir, 'src/driver.mjs'), `
     import fs from 'node:fs';
