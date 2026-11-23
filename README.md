@@ -14,6 +14,7 @@
   <a href="#看它跑一遍">看它跑一遍</a> ·
   <a href="#怎么配合">怎么配合</a> ·
   <a href="#各平台的坑实战总结">各平台的坑</a> ·
+  <a href="docs/faq.md">常见问题</a> ·
   <a href="SHOWCASE.md">用户案例</a> ·
   <a href="CONTRIBUTING.md">参与贡献</a> ·
   <a href="#作者">作者</a>
