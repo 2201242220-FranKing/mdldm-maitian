@@ -185,9 +185,21 @@ node src/hub.mjs daemon                     # 常驻（install-launchd.sh 装的
 | `auto` / `manual` | 自动提交 / 等你点发布的平台 |
 | `keepAlive` | 容易掉登录的平台（视频号），定时刷一下保活 |
 | `disabled` | 停用的平台（如 `["instagram"]`）：不体检、不打开登录页、不发布、不采粉丝。网页「系统 → 平台」里也能开关 |
+| `bilibiliAccounts` | 可选的 B 站采集账号配置；这项配置不改变发布账号或发布流程 |
 | `site` | 自有站点，可选，见下 |
 | `board` | 飞书多维表格看板，可选 |
 | `web.key` | 网页口令，所有页面和接口没有口令一律 401 |
+
+多账号采集配置示例（可选）：
+
+```json
+"bilibiliAccounts": [
+  { "id": "default", "name": "主号", "uid": "123456", "enabled": true },
+  { "id": "second", "name": "副号", "uid": "234567", "enabled": true }
+]
+```
+
+`default` 始终继承现有的 `chromePort` 和 `chromeProfile`；未填写时仍使用默认账号。副号默认使用独立端口和登录目录，也可用 `chromePort`、`chromeProfile` 单独指定，不能与其他账号重复。用户 ID（UID）用字符串填写。将 `bilibili` 放进 `disabled` 会停用整个 B 站；仅停用副号则把该账号的 `enabled` 设为 `false`。这里仅定义配置，实际按账号采集需要对应的采集功能。
 
 </details>
 
