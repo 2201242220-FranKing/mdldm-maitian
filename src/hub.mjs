@@ -9,6 +9,7 @@
 //   hub submit <id> <instagram|youtube|x>      中控卡住时，把已填好的发帖页单独提交一次（先查重）
 //   hub adopt <工程目录>                         登记一期已发过的（不上传）
 //   hub metrics [id]                            采集流量并发日报
+//   hub metrics-login <bilibili[@账号]>         打开指定 B站账号的流量浏览器
 //   hub daemon                                  常驻：到点自动取链接、提醒还没点发布的平台
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import crypto from 'node:crypto'; import { execFileSync, spawn } from 'node:child_process';
 import { db, NAMES, LOCKED, STATE_CN, upsertEpisode, getTask, getTasks, setTask, log, episodes, getEpisode, recentLogs, getMeta, setMeta, saveMetric, prevMetric, saveSnapshot } from './db.mjs';
@@ -301,7 +302,21 @@ async function collectMetrics(ep) {
   if (!lines.length) return null;
   return `【${ep.episode ? ep.episode + ' 期 ' : ''}${ep.name.split(/[｜|]/)[0]}】${any ? `全平台播放 ${total}${totalDelta ? `（较上次 +${totalDelta}）` : ''}` : ''}\n${lines.join('\n')}`;
 }
-async function metricsReport(list) {
+async function accountMetricsReport() {
+  try {
+    const { collectTraffic } = await import('./account-collect.mjs');
+    const results = await collectTraffic(SKIP_METRICS);
+    for (const r of results) console.log(`${r.name}：${r.error ? '采集失败：' + r.error : '已采集 ' + r.count + ' 个作品'}`);
+    if (!results.length) console.log('没有启用的可采集账号');
+    if (results.some(r => r.error)) throw new Error('部分账号采集失败，请查看流量页');
+  } catch (e) { throw Object.assign(e, { quiet: true }); }
+}
+async function metricsReport(list, { accounts = true } = {}) {
+  // 账号作品的每日采集需单独启用；失败不能阻断旧工程日报。
+  if (accounts && config.accountTrafficAuto === true) {
+    try { await accountMetricsReport(); }
+    catch (e) { console.error('账号作品采集失败：' + e.message); }
+  }
   const parts = [];
   for (const ep of list) { const r = await collectMetrics(ep).catch((e) => `【${ep.name}】采集出错：${e.message}`); if (r) parts.push(r); }
   // 粉丝：每天一次，和流量一起采
@@ -497,7 +512,7 @@ try {
     const t = R.reviewText(R.review(ep, +(args[2] && !args[2].startsWith('--') ? args[2] : 1))); console.log(t); if (args.includes('--notify')) await notify(t);
   }
   else if (cmd === 'weekly') { const R = await import('./review.mjs'); const w = R.weekly(); console.log(w.text); if (args.includes('--notify')) await notify(w.text); }
-  else if (cmd === 'metrics') { if (opt('--skip')) SKIP_METRICS = opt('--skip').split(','); const list = args[1] && !args[1].startsWith('--') ? [getEpisode(args[1])].filter(Boolean) : episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3); await metricsReport(list); }
+  else if (cmd === 'metrics') { if (opt('--skip')) SKIP_METRICS = opt('--skip').split(','); const id = args[1] && !args[1].startsWith('--') ? args[1] : null; const list = id ? [getEpisode(id)].filter(Boolean) : episodes().filter(e => Date.now() - Date.parse(e.created_at) < 30 * 86400e3); await metricsReport(list, { accounts: !id }); }
   else if (cmd === 'plan') {   // 只登记、不上传：大屏「分发计划」里先看到这一期
     if (args[1] && !args[1].startsWith('--')) { const r = planDir(path.resolve(args[1])); console.log(r ? `已登记计划：${r}` : '这一期已经登记过了'); }
     else { const n = scanPlans(); console.log(`扫描完成，新登记 ${n.length} 期${n.length ? '：' + n.join('、') : ''}`); }
@@ -517,6 +532,15 @@ try {
     if (needStore) console.log(`第一步：在专用 Chrome 里的应用商店页面点「添加至 Chrome」，装上麦田发布助手（之后 Chrome 会自动更新它）`);
     console.log(`专用 Chrome 已打开 ${ids.length} 个平台页面，登录完运行 hub doctor 检查`);
   }
+  else if (cmd === 'metrics-accounts') { SKIP_METRICS = (opt('--skip') || '').split(','); await accountMetricsReport(); }
+  else if (cmd === 'metrics-login') {
+    const { currentAccountTargets } = await import('./account-collect.mjs');
+    const target = currentAccountTargets().find(t => t.id === args[1] && t.platform === 'bilibili');
+    if (!target) throw Object.assign(new Error('请选择已启用的 B站账号'), { quiet: true });
+    try { await drv.openTrafficLogin(target); }
+    catch (e) { throw Object.assign(e, { quiet: true }); }
+    console.log(`${target.name}：请在专用 Chrome 登录，随后运行 hub metrics`);
+  }
   else if (cmd === 'followers') { await drv.ensure(); console.log(JSON.stringify(await collectFollowers(opt('--only') ? opt('--only').split(',') : null, opt('--skip') ? opt('--skip').split(',') : []), null, 1)); }
   else if (cmd === 'daemon') await daemon();
   else if (cmd === 'web') { const { startWeb } = await import('./web.mjs'); startWeb(); await new Promise(() => {}); }
@@ -526,6 +550,6 @@ try {
     for (const e of list) { console.log(`\n【${e.id}】${e.name}  定时 ${e.schedule || '立即'}\n${table(e.id)}`); if (args.includes('--logs')) console.log(recentLogs(e.id).map(l => `  ${l.ts.slice(11, 19)} ${l.platform} ${l.action} ${l.result}`).join('\n')); }
   } else if (cmd === 'mark') { setTask(args[1], args[2], args[3], (args[4] && !args[4].startsWith('--') ? args[4] : '人工标记'), { url: opt('--url') || undefined }); log(args[1], args[2], 'mark', args[3]); console.log(table(args[1])); }
   else if (cmd === 'notify-test') await notify('发布中控已接通 ✅');
-  else console.log('用法：hub login [--only a,b] | doctor [--only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
+  else console.log('用法：hub login [--only a,b] | doctor [--only a,b] [--quiet] | run <工程目录> [--only a,b] [--force] | status [id] [--logs] | sync <id> | followers [--skip xhs] | metrics [id] [--skip xhs] | metrics-accounts [--skip a,b] | metrics-login <bilibili[@账号]> | mark <id> <平台> <状态> | submit <id> <instagram|youtube|x> | daemon');
 } catch (e) { console.error('出错：' + e.message); if (!e.quiet) await notify(`❌ 发布中控出错：${e.message.slice(0, 300)}${helpTip()}`); code = 1; }
 await drv.close(); db.close(); process.exit(code);

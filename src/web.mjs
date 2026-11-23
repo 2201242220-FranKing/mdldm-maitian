@@ -226,6 +226,42 @@ async function handle(req, res) {
     if (!u.searchParams.get('full') && !/\.svg$/.test(f)) { const t = thumb(f, Math.min(1600, +u.searchParams.get('w') || 720)); if (t) return send(res, 200, fs.readFileSync(t), 'image/jpeg', { 'cache-control': 'max-age=3600' }); }
     return send(res, 200, fs.readFileSync(f), /\.png$/.test(f) ? 'image/png' : /\.svg$/.test(f) ? 'image/svg+xml' : 'image/jpeg', { 'cache-control': 'max-age=300' });
   }
+  // Account traffic stays separate from publishing and integration actions.
+  if (u.pathname === '/api/account-traffic') {
+    const { accountTargets } = await import('./account-targets.mjs');
+    let targets;
+    try { targets = accountTargets(JSON.parse(fs.readFileSync(CFG, 'utf8'))); }
+    catch { return send(res, 400, { error: '账号配置无效' }); }
+    const direct = (process.env.HUB_DRIVER || config.driver || 'direct') === 'direct';
+    if (req.method === 'GET') {
+      const { accountTrafficView } = await import('./account-traffic.mjs');
+      return send(res, 200, { ...accountTrafficView(db, targets.map(t => t.id)),
+        accounts: targets.map(({ id, platform, name, accountId }) => ({ id, platform, name, accountId })), direct });
+    }
+    if (req.method !== 'POST') return send(res, 405, { error: '不支持的请求方法' });
+    const origin = req.headers.origin;
+    const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+    if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== `${protocol}://${req.headers.host}`)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    let a;
+    try { a = await readJson(req); } catch { return send(res, 400, { error: '请求格式不对' }); }
+    if (!a || (a.type !== 'metricsAccounts' && a.type !== 'metricsLogin')) return send(res, 400, { error: '不支持的操作' });
+    const login = a.type === 'metricsLogin';
+    const target = login && targets.find(t => t.platform === 'bilibili' && t.id === a.id);
+    if (login && (!direct || !target)) return send(res, 400, { error: '请在 direct 模式选择已启用的 B站账号' });
+    if (!login && actions.some(x => !x.done && x.type !== 'mark')) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
+    const rec = { type: a.type, label: login ? `打开账号登录页 · ${target.name}` : '采集账号作品', startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+    actions.push(rec);
+    while (actions.length > 32 && actions[0].done) actions.shift();
+    const args = login ? ['metrics-login', target.id] : ['metrics-accounts'];
+    const child = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...args], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
+    const output = data => { rec.tail = (rec.tail + data).slice(-600); };
+    child.stdout.on('data', output);
+    child.stderr.on('data', output);
+    const finish = ok => { rec.done = true; rec.ok = ok; rec.endedAt = new Date().toISOString(); };
+    child.on('error', error => { output(error.message); finish(false); });
+    child.on('close', code => finish(code === 0));
+    return send(res, 200, { ok: true });
+  }
   if (u.pathname === '/api/integrations' && req.method === 'GET') return send(res, 200, integrations());
   if (u.pathname === '/api/integrations/feishu' && req.method === 'POST') {
     const a = await readJson(req), backup = snapConfig();

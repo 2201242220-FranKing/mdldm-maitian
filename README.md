@@ -114,7 +114,8 @@ node src/hub.mjs doctor                 # 登录完检查各平台登录态和�
   - X、YouTube、Instagram、自有站点：回读文案和定时一致后自动提交，只点一次。
   - B站、抖音、小红书、视频号：**填好就停**，等你自己点「发布 / 定时发布」，守护进程每 20 分钟提醒。
   - 防重：库里已经到位的平台不再跑；X 定时列表、YouTube Studio、Instagram 主页、站点后台已有同名的不再传。
-- **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。
+- **长势（流量和粉丝）**：每天上午采一次各期在各平台的播放和互动、各平台粉丝数；新一期头三天每 6 小时采一次。「账号作品」能单独查看 B站、抖音、小红书现有作品，不用登记发布工程。点「采集账号流量」或运行 `node src/hub.mjs metrics-accounts`；直连模式会自动启动专用 Chrome，首次需先登录。可在 `config.json` 中设置 `"accountTrafficAuto": true`，随每天的流量日报采集。失败时保留上次成功数据。
+  - B站副号可在 `bilibiliAccounts` 配置（例如 `[{ "id": "second", "name": "副号" }]`）。副号需要 `direct` 模式并使用独立的调试端口和 Chrome 登录目录（默认按 ID 分配，亦可显式设置 `chromePort`、`chromeProfile`）。可填 `uid` 防止登错号；首次成功采集后也会校验历史归属。副号不参与发布。
 - **收成（转化，可选）**：接上自有站点后，看注册、会员、订单、收入从哪个渠道、哪一期来。
 - **日历**：上周到未来两周，已发布、已定时、等你点、计划中的期一眼看清。
 - **粮仓（档案）**：每期的封面、文案快照、各平台链接、过程日志。
@@ -164,7 +165,9 @@ node src/hub.mjs status [id] [--logs]
 node src/hub.mjs sync <id> [--only a,b]     # 取链接，写 发布记录.json，回填发布素材 md 的「已发布」行
 node src/hub.mjs mark <id> <平台> <状态> [备注] [--url 链接]   # 手动改状态（平台认不出时用）
 node src/hub.mjs adopt <工程目录>            # 登记一期已经发过的（不上传），按标题取链接
-node src/hub.mjs metrics [id]               # 采流量并发日报
+node src/hub.mjs metrics [id]               # 采发布工程流量并发日报
+node src/hub.mjs metrics-accounts [--skip a,b] # 只读采集已发布的账号作品
+node src/hub.mjs metrics-login bilibili@second # 在专用 Chrome 里打开 B站副号登录页
 node src/hub.mjs followers                  # 采粉丝
 node src/hub.mjs review <id> [天数] [--notify]   # 看某期发布 N 天的复盘（守护进程会在第 1/3/7 天自动发）
 node src/hub.mjs weekly [--notify]          # 上周周报（守护进程每周一自动发）
