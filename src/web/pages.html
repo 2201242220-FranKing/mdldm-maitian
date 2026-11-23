@@ -58,12 +58,12 @@ const sec = (t, note = '') => `<div class="sec"><h2>${t}</h2><span class="note">
 const epc = (x) => `<span class="epc">${x.covers.length ? `<img src="/cover?id=${encodeURIComponent(x.id)}&k=${x.covers.includes('4x3') ? '4x3' : x.covers[0]}&v=${x.coverVer || ''}" alt="">` : '<i></i>'}<span><b>${esc(x.nick)}</b><small>第 ${esc(x.episode)} 期 · ${when(x.schedule || x.createdAt).split(' ')[0]}</small></span></span>`;
 const samplesOf = (e) => PL.map(p => ({ name: PN[p], pts: O.samples.filter(s => s.episode_id === e.id && s.platform === p && s.views != null).map(s => [Date.parse(s.ts + ':00Z'), s.views]) })).filter(s => s.pts.length).sort((a, b) => b.pts[b.pts.length - 1][1] - a.pts[a.pts.length - 1][1]);
 let after = () => {};
-let trafficPage = 0, trafficSource = 'account', accountTraffic = null, trafficRequest = 0;
+let trafficPage = 0, trafficSource = 'projects', accountTraffic = null, trafficRequest = 0;
 
 function vTraffic() {
   const hasAccounts = accountTraffic?.statuses?.length;
   const hasProjects = O.episodes.some(e => e.views > 1);
-  const sources = hasAccounts && hasProjects ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-source="account" aria-pressed="${trafficSource === 'account'}">账号作品</button><button type="button" class="btn" data-traffic-source="projects" aria-pressed="${trafficSource === 'projects'}">发布工程</button></div>` : '';
+  const sources = hasAccounts && hasProjects ? `<div class="btns traffic-switch"><button type="button" class="btn" data-traffic-source="projects" aria-pressed="${trafficSource === 'projects'}">发布工程</button><button type="button" class="btn" data-traffic-source="account" aria-pressed="${trafficSource === 'account'}">账号作品</button></div>` : '';
   if (hasAccounts && (trafficSource === 'account' || !hasProjects)) return sources + vAccountTraffic();
   return sources + vProjectTraffic() + (accountTraffic?.error ? `<p class="note" role="status">账号流量暂不可用：${esc(accountTraffic.error)}</p>` : '');
 }

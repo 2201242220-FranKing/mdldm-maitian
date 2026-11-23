@@ -32,6 +32,10 @@ node src/hub.mjs doctor --only douyin,channels
 
 加 `--quiet` 就不发飞书通知。见 [README](../README.md) 的「命令」一节。
 
+## 抖音提示「检测到高危插件」，页面暂停了？
+
+专用 Chrome 里装了别的插件。篡改猴（Tampermonkey）、抓包 / 拦截请求这类插件会被抖音判成高危，整个页面暂停。专用 Chrome 里只留「麦田发布助手」，其他插件到 `chrome://extensions` 里删掉或停用，再刷新抖音后台。日常插件装在你平时用的 Chrome 里就行，两边互不影响。
+
 ## 还有问题？
 
 到 [Discussions](https://github.com/CzzzzzzJ/mdldm-maitian/discussions) 问。
