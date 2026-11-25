@@ -99,7 +99,7 @@ async function after(ep, pj, id, res) {
       const got = await douyinTopics(res.tabId).catch(() => []);
       if (got.length !== (p.topics || []).length) { setTask(ep.id, id, 'awaiting_user', `话题只识别了 ${got.length}/${p.topics.length} 个，发之前请补`); return; }
     }
-    if (config.manual.includes(id)) { setTask(ep.id, id, 'awaiting_user', pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布'); return; }
+    if (id === 'xhs' || config.manual.includes(id)) { setTask(ep.id, id, 'awaiting_user', pj.schedule ? '已设定时，核对后点「定时发布」' : '核对后点发布'); return; }
     if (id === 'zsz') {
       const cs = await zszCourses(p.title);
       if (cs.length === 1) setTask(ep.id, id, cs[0].vis === 'published' ? 'published' : 'scheduled', cs[0].vis === 'published' ? '已上线' : '转码中，完成后自动上线', { url: SITE.courseUrl(cs[0]) });
@@ -167,7 +167,7 @@ async function run() {
   if (todo.includes('x') && pj.platforms.x.mode === 'article+quote') {
     if (!articleOn()) throw new Error('这期 X 是长文模式，只在作者自己的本地插件环境里可用；把 publish.json 里 X 的 mode 去掉，按普通视频帖发');
     todo = todo.filter(i => i !== 'x');
-    if (!LOCKED.includes((getTask(ep.id, 'x') || {}).state)) setTask(ep.id, 'x', 'scheduled', '长文模式：定时前 25 分钟由麦田启动长文脚本（长文 + 视频帖引用长文）');
+    if (!LOCKED.includes((getTask(ep.id, 'x') || {}).state)) setTask(ep.id, 'x', 'scheduled', '长文模式：定时前 25 分钟由内容工作台启动长文脚本（长文 + 视频帖引用长文）');
   }
 
   // 防重 1：库里已经到位的不再跑
@@ -421,12 +421,12 @@ async function daemon() {
   console.log(`发布中控守护进程启动（${drv.mode}）`);
   // 开机后 NAS 往往比守护进程晚挂上：等一等，自己挂一次（密码在钥匙串里），5 分钟还不行再报警
   { let ok = false; for (let i = 0; i < 10 && !(ok = await ensureNas()); i++) await drv.sleep(30000);
-    if (ok) console.log('NAS 可读'); else await notify('⚠️ 麦田守护进程启动 5 分钟后仍读不到 NAS（已尝试自动挂载），取链接和封面会失败，请检查 NAS 是否开机'); }
+    if (ok) console.log('NAS 可读'); else await notify('⚠️ 内容工作台守护进程启动 5 分钟后仍读不到 NAS（已尝试自动挂载），取链接和封面会失败，请检查 NAS 是否开机'); }
   const MIN = 60000, every = (key, ms) => { const last = +getMeta(key) || 0; if (Date.now() - last < ms) return false; setMeta(key, Date.now()); return true; };
   for (;;) {
     try {
       await syncSalesIfDue().catch(e => console.error('小鹅通销售同步出错：' + e.message));
-      if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ 麦田读不到 NAS，已尝试自动挂载但没成功');
+      if (!(await ensureNas()) && every('nasAlert', 60 * MIN)) await notify('⚠️ 内容工作台读不到 NAS，已尝试自动挂载但没成功');
       else if (every('scanPlans', 30 * MIN)) { const n = scanPlans(); if (n.length) await notify(`🗓 分发计划新增 ${n.length} 期\n${n.join('\n')}`); }
       for (const ep of episodes()) {
         if (Date.now() - Date.parse(ep.created_at) > 14 * 86400e3) continue;

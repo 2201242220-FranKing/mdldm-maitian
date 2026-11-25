@@ -5,18 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f5f5f7">
-<title>麦田</title>
-<meta name="apple-mobile-web-app-title" content="麦田">
-<link rel="apple-touch-icon" href="/static/icon-180.png">
-<link rel="icon" href="/static/icon-180.png">
+<title>内容工作台</title>
+<meta name="apple-mobile-web-app-title" content="内容工作台">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=2">
+<link rel="icon" href="/static/icon-180.png?v=2">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/static/mt.css">
+<link rel="stylesheet" href="/static/mt.css?v=2">
 
 </head>
 <body>
 <div class="bgfx"><i></i><i></i><i></i></div>
 <div class="page" id="app"><div class="empty" style="height:60vh">加载中…</div></div>
-<script src="/static/mt.js"></script>
+<script src="/static/mt.js?v=2"></script>
+<script src="/static/publish.js?v=1"></script>
 <script>
 let S = null, settingsDirty = false;
 let O = null, I = null, F = {}, timer = null, pick = null;
@@ -224,8 +225,8 @@ async function vEpisode(id) {
   <div class="panel ephero">${e.covers.length ? `<img src="/cover?id=${encodeURIComponent(e.id)}&k=${e.covers.includes('4x3') ? '4x3' : e.covers[0]}&v=${e.coverVer || ''}" alt="">` : '<div></div>'}
     <div><div class="eyebrow">第 ${esc(e.episode)} 期</div><div class="h1" style="margin:6px 0">${esc(t1)}</div>${t2 ? `<p class="lead" style="margin:0 0 14px">${esc(t2)}</p>` : ''}
       <div style="display:flex;gap:34px;flex-wrap:wrap;margin:6px 0 16px"><div><div class="lab" style="font-size:12px;color:var(--t3)">全平台播放</div><div class="val">${e.views > 1 ? fmt(e.views) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动</div><div class="val">${e.views > 1 ? fmt(e.inter) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">互动率</div><div class="val">${e.views > 1 ? pct(e.inter, e.views, 1) : '–'}</div></div><div><div style="font-size:12px;color:var(--t3)">已发布</div><div class="val">${e.tasks.filter(t => t.state === 'published').length}/${e.tasks.length}</div></div></div>
-      <dl class="kv"><dt>发布时间</dt><dd>${e.publishAt ? when(e.publishAt) : e.schedule ? when(e.schedule) : '立即发布'}${e.publishAt && e.schedule ? `<span style="color:var(--t3);font-size:12px;margin-left:8px">计划 ${when(e.schedule)}</span>` : ''}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
-      <div class="btns" style="margin-top:16px">${abtn({ type: 'sync', id: e.id }, '取链接、对状态', 'pri')}${abtn({ type: 'metrics', id: e.id }, '采这一期的流量')}</div></div></div>
+      <dl class="kv"><dt>发布类型</dt><dd>${e.mediaType === 'images' ? `图文 · ${e.imageCount} 张图片` : '视频'}</dd><dt>发布时间</dt><dd>${e.publishAt ? when(e.publishAt) : e.schedule ? when(e.schedule) : '未定时'}${e.publishAt && e.schedule ? `<span style="color:var(--t3);font-size:12px;margin-left:8px">计划 ${when(e.schedule)}</span>` : ''}</dd>${e.durationSec ? `<dt>时长</dt><dd>${Math.floor(e.durationSec / 60)} 分 ${Math.round(e.durationSec % 60)} 秒</dd>` : ''}${e.campaign ? `<dt>链接标记</dt><dd>${esc(e.campaign)}</dd>` : ''}<dt>工程里有</dt><dd>${e.files.map(esc).join('、') || '读不到工程目录'}</dd></dl>
+      <div class="btns" style="margin-top:16px">${e.tasks.some(t => t.platform === 'xhs' && ['planned', 'failed', 'stopped', 'not_logged_in'].includes(t.state)) ? abtn({ type: 'fill-xhs', id: e.id }, '填写小红书（不发布）', 'pri', '将上传素材并填写小红书草稿，但不会点击发布。若此前填写失败，请先确认平台没有残留草稿，避免重复上传。继续？') : ''}${abtn({ type: 'sync', id: e.id }, '取链接、对状态')}${abtn({ type: 'metrics', id: e.id }, '采这一期的流量')}</div></div></div>
   ${todo.length ? `${sec('等你点发布')}<div class="panel">${todo.map(t => `<div class="prow">${logo(t.platform)}<span class="n" style="width:auto;margin-right:auto">${esc(PN[t.platform] || t.name)}<span style="color:var(--t3);margin-left:10px;font-size:12px">${esc(t.detail)}</span></span>${abtn({ type: 'mark', id: e.id, platform: t.platform, state: 'published' }, '我已发布', '', `确认「${t.name}」已经发出去了？`)}</div>`).join('')}</div>` : ''}
   ${sec('各平台')}
   <div class="panel"><div class="tw"><table><thead><tr><th>平台</th><th>状态</th><th>发布</th><th class="n">播放</th><th class="n">赞</th><th class="n">评论</th><th class="n">收藏</th><th class="n">转发</th><th class="n">互动率</th><th></th></tr></thead><tbody>
@@ -364,7 +365,7 @@ function vSystem() {
   const h = O.health, today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }), cur = O.episodes?.[0], ps = h.platforms || [];
   const dates = ps.filter(p => !p.disabled && p.day).map(p => p.day);
   const lastCheck = dates.sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true })).at(-1);
-  return `<div class="h1">系统</div><p class="lead">麦田的运行情况与账号设置。</p>
+  return `<div class="h1">系统</div><p class="lead">内容工作台的运行情况与账号设置。</p>
   <div class="grid g4">${tile('守护进程', '运行中', '开机自启，崩溃自动拉起')}${tile('NAS', h.nas ? '已挂载' : '读不到', h.nas ? '工程目录可读' : '取链接和封面会失败')}${tile('专用浏览器', h.chrome ? '在线' : '没开', '各平台的登录都在这里')}${tile('平台登录', platformSummary(h), lastCheck ? `最近检查 ${esc(lastCheck)}${lastCheck === today ? '（今天）' : ''}` : '点击「检查」可查看账号登录状态')}</div>
   ${sec('平台', '登录、体检和常用操作；扫码要人在这台电脑前')}
   <div class="panel"><div class="btns" style="margin-bottom:4px">${abtn({ type: 'doctor' }, '全部检查', 'pri')}${abtn({ type: 'login' }, '打开全部登录页')}${cur ? abtn({ type: 'sync', id: cur.id }, `取「${esc(cur.nick)}」的链接`) : ''}${abtn({ type: 'metrics' }, '采流量')}${abtn({ type: 'followers' }, '采粉丝')}${O.siteOn ? abtn({ type: 'board' }, `同步${esc(O.siteName || '知识站')}数据`) : ''}</div>
@@ -398,9 +399,11 @@ function vSystem() {
 }
 
 async function render(forceSettingsRender = false) {
+  capturePublishDraft();
   captureSiteDraft(); captureFsDraft();
   const h = location.hash || '#/traffic', key = h.startsWith('#/ep/') ? 'archive' : h.slice(2).split('/')[0], app = $('#app'); after = () => {};
   if (!O || (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender)) return;
+  if (key === 'publish' && composer.saving && $('#publish-form')) return;
   let body;
   try {
     if (key === 'system') {
@@ -409,7 +412,7 @@ async function render(forceSettingsRender = false) {
         if (!settingsDirty) S = Array.isArray(settings?.bilibiliAccounts) ? settings : null;
       }
     }
-    body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
+    body = h.startsWith('#/ep/') ? await vEpisode(decodeURIComponent(h.slice(5))) : ({ publish: vPublish, traffic: vTraffic, calendar: vCalendar, convert: vConvert, archive: vArchive, system: vSystem }[key] || vTraffic)();
   } catch (e) { body = `<div class="empty" style="height:40vh">出错了：${esc(e.message)}</div>`; }
   if (h !== (location.hash || '#/traffic')) return;
   if (settingsDirty && key === 'system' && $('#settings-form') && !forceSettingsRender) return;
@@ -423,7 +426,7 @@ async function render(forceSettingsRender = false) {
 }
 async function load() {
   try { captureSiteDraft(); captureFsDraft(); O = await api('/api/overview'); I = await api('/api/integrations').catch(() => null); const off = new Set((O.health.platforms || []).filter(p => p.disabled).map(p => p.id)); if (!(O.health.platforms || []).some(p => p.id === 'wechat')) off.add('wechat'); PL = PL_ALL.filter(p => !off.has(p) && ((O.siteOn && !O.siteSalesOnly) || p !== 'zsz')); if (O.siteOn) { if (O.siteName) PN.zsz = O.siteName; if (O.siteLogo) LOGO.zsz = { img: '/site-logo' }; } F = {}; for (const r of O.followers) (F[r.platform] ||= {})[r.day] = r.total; noteDoctorDone(O.health); await render(); }
-  catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上麦田服务（${esc(e.message)}）</div>`; }
+  catch (e) { if (!O) $('#app').innerHTML = `<div class="empty" style="height:60vh">连不上内容工作台服务（${esc(e.message)}）</div>`; }
   await refreshAccountTraffic();
 }
 async function refreshAccountTraffic() {

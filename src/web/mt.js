@@ -1,4 +1,4 @@
-// 麦田下钻页的公共部分：格式化、Logo、顶栏、提示、图表
+// 内容工作台下钻页的公共部分：格式化、Logo、顶栏、提示、图表
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => n == null ? '–' : Math.round(n).toLocaleString('en-US');
@@ -32,8 +32,8 @@ function loginLight(h) {
 const platformSummary = (h) => loginLight(h)[1].replace(/^平台登录 /, '');
 function topbar(O, on) {
   const h = O.health, n = new Date(), [lc, lt] = loginLight(h);
-  const nav = [['/', '大屏', 'board'], ['/p#/traffic', '流量', 'traffic'], ['/p#/calendar', '日历', 'calendar'], ['/p#/convert', O.siteSalesOnly ? '销售' : '转化', 'convert'], ['/p#/archive', '档案', 'archive'], ['/p#/system', '系统', 'system']];
-  return `<div class="top"><a class="logo" href="/">麦<i>田</i></a><div class="tag">内容与粉丝监控</div><div class="nav">${nav.map(([u, t, k]) => `<a class="${k === on ? 'on' : ''}" href="${u}">${t}</a>`).join('')}</div>
+  const nav = [['/', '大屏', 'board'], ['/p#/publish', '发布', 'publish'], ['/p#/traffic', '流量', 'traffic'], ['/p#/calendar', '日历', 'calendar'], ['/p#/convert', O.siteSalesOnly ? '销售' : '转化', 'convert'], ['/p#/archive', '档案', 'archive'], ['/p#/system', '系统', 'system']];
+  return `<div class="top"><a class="logo" href="/"><img class="brand-mark" src="/static/icon-180.png?v=2" width="28" height="28" alt="">内容工作台</a><div class="tag">内容与粉丝监控</div><div class="nav">${nav.map(([u, t, k]) => `<a class="${k === on ? 'on' : ''}" href="${u}">${t}</a>`).join('')}</div>
     <div class="lights"><span class="light ok">守护进程 运行中</span><span class="light ${h.nas ? 'ok' : 'bad'}">NAS ${h.nas ? '已挂载' : '读不到'}</span><span class="light ${h.chrome ? 'ok' : 'bad'}">专用浏览器 ${h.chrome ? '在线' : '没开'}</span><span class="light ${lc}">${lt}</span></div>
     <div class="clock"><small>${n.getMonth() + 1}/${n.getDate()} 周${'日一二三四五六'[n.getDay()]}</small>${pad(n.getHours())}:${pad(n.getMinutes())}</div></div>`;
 }

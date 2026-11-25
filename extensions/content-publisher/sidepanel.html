@@ -1,0 +1,118 @@
+<!doctype html>
+<!-- 本地开发版：新增小红书图文入口和素材编辑。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>内容工作台发布助手</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <h1>内容工作台发布助手</h1>
+    <p class="sub">只填写、不发布，最后由你点发布</p>
+    <nav class="tabs">
+      <button data-view="video" class="tab on">视频分发</button>
+      <button data-view="images" class="tab">小红书图文</button>
+      <button data-view="article" class="tab">X 长文</button>
+    </nav>
+  </header>
+
+  <main id="view-video">
+    <section class="card">
+      <div class="row">
+        <div>
+          <div class="label">NAS 发布目录</div>
+          <div id="nasName" class="value">未选择</div>
+        </div>
+        <div class="actions">
+          <button id="btnNasRegrant" class="hidden">授权</button>
+          <button id="btnNasRescan" class="ghost hidden">刷新</button>
+          <button id="btnNasPick" class="ghost">选择</button>
+        </div>
+      </div>
+      <label class="opt path">本机路径 <input id="nasPath" type="text" spellcheck="false" placeholder="比如 /Users/你/Movies/视频导出"></label>
+    </section>
+
+    <section class="card">
+      <div class="label">发布工程 <span class="hint" id="projectHint">视频工程</span></div>
+      <ul id="projects" class="notes"></ul>
+    </section>
+
+    <section class="card hidden" id="projCard">
+      <div id="projTitle" class="pv-title"></div>
+      <div id="projMeta" class="pv-meta"></div>
+      <ul id="projCheck" class="warn"></ul>
+      <form id="imageForm" class="hidden">
+        <label>标题<input id="imageTitle" type="text" required maxlength="40"></label>
+        <label>正文<textarea id="imageBody" rows="6" required maxlength="2000"></textarea></label>
+        <label>话题<input id="imageTopics" type="text" placeholder="#主题 #话题"></label>
+        <label>定时（北京时间，可留空）<input id="imageSchedule" type="datetime-local"></label>
+        <ol id="imageFiles" class="image-files"></ol>
+        <button id="btnImageSave" type="submit">保存图文工程</button>
+        <div id="imageMessage" role="status" aria-live="polite"></div>
+      </form>
+      <div id="aiBox" class="ai">
+        <div class="row"><div class="label">✨ AI 写文案 <span class="hint">一次写好七个平台</span></div><button id="btnAiAccount" class="ghost small">连接知识站账号</button></div>
+        <div id="aiQuota" class="hint"></div>
+        <input id="aiTitle" type="text" placeholder="视频标题（可选）" spellcheck="false">
+        <textarea id="aiBrief" rows="5" placeholder="这期视频讲了什么？贴口播稿、字幕或几句要点（至少 20 字）。文件夹里有字幕 .srt 或口播稿会自动读进来。"></textarea>
+        <div class="buttons"><button id="btnAiGen">AI 写七个平台文案</button><button id="btnAiVip" class="ghost hidden">开通会员</button></div>
+        <ul id="aiMsg" class="warn"></ul>
+      </div>
+      <ul id="platList" class="plats"></ul>
+      <div class="buttons" id="projButtons">
+        <button id="btnCheck" class="ghost" disabled>检查登录</button>
+        <button id="btnLinks" class="ghost" disabled>回填链接</button>
+        <button id="btnPublish" class="primary" disabled>一键填写所选平台</button>
+        <button id="btnPubStop" class="ghost hidden">停止</button>
+      </div>
+    </section>
+
+    <section id="statusList"></section>
+  </main>
+
+  <main id="view-article" class="hidden">
+  <section class="card" id="vaultCard">
+    <div class="row">
+      <div>
+        <div class="label">Obsidian 库</div>
+        <div id="vaultName" class="value">未选择</div>
+      </div>
+      <div class="actions">
+        <button id="btnRegrant" class="hidden">授权</button>
+        <button id="btnRescan" class="ghost hidden" title="重新扫描">刷新</button>
+        <button id="btnPick" class="ghost">选择</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="noteCard">
+    <div class="label">选择笔记 <span class="hint">按最近修改排序</span></div>
+    <input id="search" type="search" placeholder="搜索笔记名或路径…" disabled>
+    <ul id="notes" class="notes"></ul>
+  </section>
+
+  <section class="card hidden" id="previewCard">
+    <div class="label">预览</div>
+    <div id="pvTitle" class="pv-title"></div>
+    <div id="pvMeta" class="pv-meta"></div>
+    <ol id="pvList" class="pv-list"></ol>
+    <ul id="pvWarn" class="warn"></ul>
+  </section>
+
+  <section class="card" id="runCard">
+    <div id="target" class="target">检测编辑页中…</div>
+    <label class="opt"><input type="checkbox" id="optVerify" checked> 插入后逐段核对，漏掉的自动补回</label>
+    <label class="opt">每张图上传后等待 <input type="number" id="optSettle" min="3" max="60" value="12"> 秒再继续</label>
+    <div class="buttons">
+      <button id="btnRun" class="primary" disabled>插入到当前长文草稿</button>
+      <button id="btnStop" class="ghost hidden">停止</button>
+    </div>
+    <div class="bar"><div id="barFill"></div></div>
+    <ol id="log" class="log"></ol>
+  </section>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

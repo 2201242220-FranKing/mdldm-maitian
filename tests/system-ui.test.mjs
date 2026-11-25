@@ -39,6 +39,7 @@ function fixture(getSettings = true) {
     },
   });
   vm.runInContext(source('mt.js'), ctx);
+  vm.runInContext(source('publish.js'), ctx);
   vm.runInContext(page, ctx);
   return { calls, elements, listeners, run: js => vm.runInContext(js, ctx) };
 }
@@ -84,7 +85,7 @@ test('polling preserves unsaved edits and dirty settings block platform toggles'
   await run('load()');
   assert.equal(elements.get('#app').innerHTML, 'unsaved form');
   const toggle = { dataset: { act: JSON.stringify({ type: 'toggle-platform', platform: 'bilibili', on: false }) } };
-  await listeners.click[0]({ target: { closest: s => s === '[data-act]' ? toggle : null } });
+  for (const listener of listeners.click) await listener({ target: { closest: s => s === '[data-act]' ? toggle : null } });
   assert.ok(!calls.some(([url]) => url === '/api/platform-toggle'));
 });
 
@@ -98,10 +99,31 @@ test('account edits use one atomic replacement request and no publisher platform
     querySelector: selector => selector === '[name="accountName"]' ? { value: ' 主号 ' } : { checked: false },
   };
   const form = { id: 'settings-form', querySelector: () => button, querySelectorAll: () => [row] };
-  await listeners.submit[0]({ target: form, preventDefault() {} });
+  for (const listener of listeners.submit) await listener({ target: form, preventDefault() {} });
   assert.deepEqual(calls.find(([, payload]) => payload?.action === 'replace'), [
     '/api/bilibili-accounts', { action: 'replace', bilibiliAccounts: [{ id: 'default', name: '主号', uid: '123', enabled: false }] },
   ]);
   assert.ok(!calls.some(([url]) => url === '/api/platform-toggle'));
   assert.equal(button.disabled, false);
+});
+
+test('composer exposes separate video and ordered image modes and escapes draft copy', async () => {
+  const { elements, run } = fixture();
+  await run('load()');
+  run("location.hash = '#/publish'; composer.title = '<测试>'; composer.body = '</textarea><script>bad()</script>'");
+  await run('render()');
+  let html = elements.get('#app').innerHTML;
+  assert.match(html, /name="mediaType" value="video" checked/);
+  assert.match(html, /accept="video\/mp4"/);
+  assert.match(html, /保存到发布计划/);
+  assert.match(html, /&lt;测试&gt;/);
+  assert.doesNotMatch(html, /<script>bad/);
+  run("composer.mediaType = 'images'; composer.files = [{file:{name:'first.png',size:120},url:'blob:first'},{file:{name:'second.png',size:120},url:'blob:second'}]");
+  await run('render()');
+  html = elements.get('#app').innerHTML;
+  assert.match(html, /name="mediaType" value="images" checked/);
+  assert.match(html, /accept="image\/png,image\/jpeg,image\/webp" multiple/);
+  assert.match(html, /data-media-move="1"/);
+  assert(html.indexOf('first.png') < html.indexOf('second.png'));
+  assert.doesNotMatch(html, /<video/);
 });

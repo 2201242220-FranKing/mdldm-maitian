@@ -1,4 +1,7 @@
 config.json
+config.json.bak
+.playwright-cli/
+output/
 data/
 node_modules/
 chrome-profile/

@@ -1,4 +1,4 @@
-// 麦田：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
+// 内容工作台：本地网页。播种（发布）、长势（流量）、收成（转化）、粮仓（档案）
 import http from 'node:http'; import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { db, NAMES, STATE_CN, episodes, getEpisode, getTasks, recentLogs, getSnapshot, getMeta, setMeta } from './db.mjs';
 import { config, testFeishu } from './feishu.mjs';
@@ -9,6 +9,8 @@ import { buildSalesSummary, salesDateRange } from './sales.mjs';
 import { review } from './review.mjs';
 import { accessEmail } from './access.mjs';
 import { initLogin, sessionOk, handleLogin } from './login.mjs';
+import { mediaType } from './publish-media.mjs';
+import { createPublishDraft, uploadPublishAsset, preparePublishProject, PublishInputError } from './publish-projects.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(DIR, '..');
 let W = config.web || { port: 8787, key: '' };
@@ -65,6 +67,7 @@ function episodeView(ep, full = false) {
   const publishMs = firstPublish || anyPublish || (fallback.length ? Math.min(...fallback) : 0);
   const publishAt = publishMs ? new Date(publishMs).toISOString() : '';
   const out = { id: ep.id, episode: ep.episode, name: ep.name, short: short(ep.name), nick: nickOf(ep.name, pj), schedule: ep.schedule, publishAt, createdAt: ep.created_at, dir: ep.dir,
+    mediaType: mediaType(pj), imageCount: Array.isArray(pj.images) ? pj.images.length : 0,
     campaign: (JSON.stringify(pj.platforms).match(/utm_campaign=([\w-]+)/) || [])[1] || '', covers, coverVer, durationSec: pj.durationSec || 0, tasks, views, inter };
   if (full) {
     out.logs = recentLogs(ep.id, 200);
@@ -114,7 +117,7 @@ function widgetData() {
   const zsz = stat('zsz');
   const salesTotal = key => days.length === 7 && days.every(d => d[key] != null && Number.isFinite(d[key])) ? days.reduce((n, d) => n + Math.round(d[key] * 100), 0) / 100 : null;
   const revenue = salesTotal('revenue'), refund = salesTotal('refund');
-  return { name: config.name || '麦田', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
+  return { name: config.name || '内容工作台', owner: W.owner || '', avatar: !!W.avatar, fans: { total: sum('total'), today: sum('today'), week: sum('week') }, platforms,
     latest: ev && { title: ev.short, nick: ev.nick, views: ev.views, inter: ev.inter, hours: Math.round((now - Date.parse(pub.schedule)) / 36e5) },
     site: SITE && (SITE.salesOnly ? { name: SITE.name, salesOnly: true, dataThrough: days.length ? siteDay : null, orders: salesTotal('orders'), revenue, refund, net: revenue != null && refund != null ? Math.round((revenue - refund) * 100) / 100 : null }
       : { name: SITE.name, users: zsz && zsz.total, reg: days.reduce((n, d) => n + (d.reg || 0), 0), vip: days.reduce((n, d) => n + (d.vip || 0), 0), revenue: days.reduce((n, d) => n + (d.revenue || 0), 0) }),
@@ -122,12 +125,13 @@ function widgetData() {
 }
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>麦田小组件</title>
+const widgetPage = (code) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>内容工作台小组件</title>
+<link rel="icon" href="/static/icon-180.png?v=2">
 <style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;padding:22px 18px 40px;background:#f6f1e6;color:#1c1a16;line-height:1.6}h1{font-size:24px;margin:0 0 6px}ol{padding-left:20px;font-size:15px}li{margin:6px 0}
 button{width:100%;height:50px;border:0;border-radius:14px;background:#1c1a16;color:#fff;font-size:17px;font-weight:800;margin:14px 0}pre{background:#fff;border-radius:12px;padding:12px;font-size:11px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all}
-.tip{font-size:13px;color:#7a7160}</style></head><body><h1>🌾 麦田小组件</h1>
-<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本（自动更新的加载器，只需粘贴这一次）</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「麦田」；已经有「麦田」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「麦田」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「麦田」</li></ol>
-<button id="b">复制脚本</button><p class="tip">以后小组件改样式，手机上会自动用上新版，不用再粘贴。脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开麦田别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
+.tip{font-size:13px;color:#7a7160}h1{display:flex;align-items:center;gap:8px}</style></head><body><h1><img src="/static/icon-180.png?v=2" width="32" height="32" alt="">内容工作台小组件</h1>
+<ol><li>App Store 安装 <b>Scriptable</b>（免费）</li><li>点下面的按钮复制脚本（自动更新的加载器，只需粘贴这一次）</li><li>打开 Scriptable → 右上角 <b>＋</b> → 粘贴 → 标题改成「内容工作台」；已经有「内容工作台」脚本的，打开它全选、粘贴覆盖</li><li>长按桌面 → 左上角 <b>＋</b> → 搜 Scriptable → 选中号 → 添加；长按小组件 → 编辑小组件 → Script 选「内容工作台」</li><li>锁屏：长按锁屏 → 自定 → 添加小组件 → Scriptable → 同样选「内容工作台」</li></ol>
+<button id="b">复制脚本</button><p class="tip">以后小组件改样式，手机上会自动用上新版，不用再粘贴。脚本里带着小组件口令，只能读汇总数字（粉丝、播放、站点近 7 天），打不开内容工作台别的页面。别发给别人；泄露了在 config.json 换一个 widgetToken 即可。</p>
 <pre id="c"></pre><script>const code=${JSON.stringify(code).replace(/</g, '\\u003c')};document.getElementById('c').textContent=code;
 document.getElementById('b').onclick=async()=>{try{await navigator.clipboard.writeText(code);b.textContent='已复制 ✓';}catch{const r=document.createRange();r.selectNodeContents(c);getSelection().removeAllRanges();getSelection().addRange(r);b.textContent='长按选中的文字复制';}};</script></body></html>`;
 
@@ -164,6 +168,10 @@ function integrations() {
 const readJson = (req) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > 20000) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); req.on('error', rej); });
 const snapConfig = () => JSON.parse(JSON.stringify(config));
 const rollbackConfig = (backup) => { for (const k of Object.keys(config)) delete config[k]; Object.assign(config, backup); };
+const sameOrigin = req => {
+  const protocol = req.headers['x-forwarded-proto'] || (req.socket.encrypted || /https/.test(req.headers['cf-visitor'] || '') ? 'https' : 'http');
+  return req.headers['sec-fetch-site'] !== 'cross-site' && (!req.headers.origin || req.headers.origin === `${protocol}://${req.headers.host}`);
+};
 
 async function handle(req, res) {
   const u = new URL(req.url, 'http://x');
@@ -180,7 +188,7 @@ async function handle(req, res) {
   }
   if (u.pathname === '/api/widget/code') return W.widgetToken && tokenEq(u.searchParams.get('t'), W.widgetToken) ? send(res, 200, widgetScript(req, 'maitian-widget.js'), 'text/javascript; charset=utf-8') : send(res, 401, '');   // 加载器每次刷新来取最新代码
   if (u.pathname === '/api/widget') return W.widgetToken && tokenEq(u.searchParams.get('t') || req.headers['x-widget-token'], W.widgetToken) ? send(res, 200, widgetData()) : send(res, 401, { error: '小组件口令不对' });
-  if (u.pathname === '/manifest.webmanifest') return send(res, 200, { name: config.name || '麦田', short_name: config.name || '麦田', start_url: '/', display: 'standalone', background_color: '#efe7d8', theme_color: '#efe7d8', icons: [{ src: '/static/icon-512.png', sizes: '512x512', type: 'image/png' }] }, 'application/manifest+json');
+  if (u.pathname === '/manifest.webmanifest') return send(res, 200, { name: config.name || '内容工作台', short_name: config.name || '内容工作台', start_url: '/', display: 'standalone', background_color: '#efe7d8', theme_color: '#efe7d8', icons: [{ src: '/static/icon-512.png?v=2', sizes: '512x512', type: 'image/png' }] }, 'application/manifest+json');
   // 飞书验证码登录（config.web.login = "feishu"）：/login 页面和接口不需要先登录
   const LOGIN = W.login === 'feishu' && config.feishuWebhook;
   if (LOGIN && await handleLogin(req, res, u, send)) return;
@@ -189,6 +197,22 @@ async function handle(req, res) {
     if (u.searchParams.get('key') === W.key) return send(res, 302, '', 'text/plain', { 'set-cookie': `mt_key=${W.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, location: '/' });
     if (LOGIN) return u.pathname.startsWith('/api/') ? send(res, 401, { error: '需要登录' }) : send(res, 302, '', 'text/plain', { location: '/login' });
     return send(res, 401, '<meta charset="utf-8"><body style="font:16px system-ui;padding:40px">需要访问口令。请用带 <code>?key=…</code> 的地址打开一次。</body>', 'text/html; charset=utf-8');
+  }
+  if (u.pathname === '/api/publish-drafts' || u.pathname.startsWith('/api/publish-drafts/')) {
+    if (req.method !== 'POST') return send(res, 405, { error: '请求方法不支持' });
+    if (!sameOrigin(req)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+    const asset = u.pathname.match(/^\/api\/publish-drafts\/([^/]+)\/assets$/);
+    const prepare = u.pathname.match(/^\/api\/publish-drafts\/([^/]+)\/prepare$/);
+    const type = req.headers['content-type'] || '';
+    if (asset ? !/^application\/octet-stream(?:;|$)/i.test(type) : !/^application\/json(?:;|$)/i.test(type)) return send(res, 415, { error: '请求内容类型不对' });
+    try {
+      if (asset) return send(res, 201, await uploadPublishAsset(asset[1], u.searchParams.get('name'), req));
+      if (prepare) return send(res, 201, await preparePublishProject(prepare[1], await readJson(req)));
+      if (u.pathname === '/api/publish-drafts') return send(res, 201, await createPublishDraft(await readJson(req)));
+      return send(res, 404, { error: '没有这个发布操作' });
+    } catch (e) {
+      return send(res, e instanceof PublishInputError ? e.status : 500, { error: e instanceof PublishInputError ? e.message : '保存发布工程失败：' + e.message });
+    }
   }
   if (u.pathname === '/api/bilibili-accounts') {
     const { bilibiliAccountView, saveBilibiliAccounts, InvalidBilibiliAccounts } = await import('./config-admin.mjs');
@@ -205,7 +229,7 @@ async function handle(req, res) {
   if (u.pathname === '/p') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'pages.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/board') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
   if (u.pathname === '/') return send(res, 200, fs.readFileSync(path.join(DIR, 'web', 'board.html')), 'text/html; charset=utf-8');
-  if (u.pathname === '/widget') {   // 小组件安装页（已登录才能看）：脚本里填好麦田地址和小组件口令，手机上一键复制
+  if (u.pathname === '/widget') {   // 小组件安装页（已登录才能看）：脚本里填好内容工作台地址和小组件口令，手机上一键复制
     if (!W.widgetToken) return send(res, 404, '<meta charset="utf-8">没配 config.web.widgetToken', 'text/html; charset=utf-8');
     return send(res, 200, widgetPage(widgetScript(req, 'maitian-loader.js')), 'text/html; charset=utf-8');
   }
@@ -217,7 +241,7 @@ async function handle(req, res) {
       orders: readable ? db.prepare('SELECT id,title,amount,status,time,kind FROM site_orders ORDER BY time DESC,id DESC LIMIT 10').all() : [],
       syncedAt: readable && getMeta('siteLiveSyncedAt'), ordersSyncedAt: readable && getMeta('siteOrdersSyncedAt'), error: getMeta('siteError'), ordersError: getMeta('siteOrdersError') }) : null;
     const episodeRows = episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e));
-    return send(res, 200, { name: config.name || '麦田', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
+    return send(res, 200, { name: config.name || '内容工作台', siteOn: !!SITE, siteSalesOnly: salesOnly, siteSyncedAt: SITE ? getMeta('siteSyncedAt') : '', siteError: SITE ? getMeta('siteError') : '', learn: learnOn(config) ? learnUrl('maitian-board') : '', siteName: SITE ? SITE.name : '', siteLogo: !!(SITE && config.site.logo), board: config.board && config.board.url, driver: config.driver,
       episodes: episodes().sort((a, b) => (b.episode || 0) - (a.episode || 0)).map(e => episodeView(e)), actions: actions.slice(-8).reverse(),
       site: { days: siteDays, channels: readable && !salesOnly ? db.prepare('SELECT * FROM site_channels ORDER BY revenue DESC').all() : [],
         campaigns: readable && !salesOnly ? db.prepare('SELECT * FROM site_campaigns ORDER BY reg DESC').all() : [], campaignsOn: SITE && !salesOnly && getMeta('siteCampaigns') === 'on', ...(sales && { sales }) },
@@ -327,16 +351,27 @@ async function handle(req, res) {
         doctor: ['doctor', ...(a.platform && PLATFORMS.includes(a.platform) ? ['--only', a.platform, '--quiet'] : ['--notify'])],
         board: ['board'], followers: ['followers'],
         login: ['login', ...(a.platform && PLATFORMS.includes(a.platform) ? ['--only', a.platform] : [])],
-        mark: ['mark', a.id, a.platform, a.state, a.note || '在麦田里标记', ...(a.url ? ['--url', a.url] : [])] };
+        mark: ['mark', a.id, a.platform, a.state, a.note || '在内容工作台里标记', ...(a.url ? ['--url', a.url] : [])] };
+      if (a.type === 'fill-xhs') {
+        if (!sameOrigin(req)) return send(res, 403, { error: '不接受其他网站发起的操作' });
+        const ep = typeof a.id === 'string' && getEpisode(a.id), pj = ep && readPj(ep.dir);
+        const task = ep && getTasks(ep.id).find(t => t.platform === 'xhs');
+        if (!pj?.platforms?.xhs || pj.platforms.xhs.skip || pj.archive?.mode === 'archive_only' || !task) return send(res, 400, { error: '没有可填写的小红书工程' });
+        if (['pending', 'running', 'filled', 'awaiting_user', 'scheduled', 'published'].includes(task.state)) return send(res, 409, { error: '任务已开始或已填好，请先检查平台草稿，不能重复上传' });
+        if ((config.disabled || []).includes('xhs')) return send(res, 400, { error: '小红书已停用' });
+        if ((process.env.HUB_DRIVER || config.driver || 'direct') !== 'direct' && mediaType(pj) === 'images') return send(res, 400, { error: '图文需要 direct 驱动' });
+        map[a.type] = ['run', ep.dir, '--only', 'xhs'];
+      }
       const argv = map[a.type];
       if (!argv || argv.some(x => x === undefined || x === null || x === '')) return send(res, 400, { error: '不支持的操作' });
       if (a.type === 'mark' && (a.state !== 'published' || !getEpisode(a.id) || !NAMES[a.platform])) return send(res, 400, { error: '状态不对' });
       // 登录不受「同一时间只跑一个」限制：掉线时正体检着也要能马上打开登录页
       if (actions.some(x => !x.done && x.type !== 'mark') && !['mark', 'login'].includes(a.type)) return send(res, 409, { error: '上一个操作还在跑，等它结束' });
-      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
+      const rec = { type: a.type, platform: a.platform && PLATFORMS.includes(a.platform) ? a.platform : '', label: { sync: '取链接', metrics: '采流量', doctor: '体检', board: `同步${SITE ? SITE.name : '知识站'}数据`, followers: '采粉丝', mark: '标记状态', login: '打开登录页', retry: '重跑平台', 'fill-xhs': '填写小红书（不发布）' }[a.type] + (a.platform ? ` · ${NAMES[a.platform] || a.platform}` : ''), startedAt: new Date().toISOString(), done: false, ok: null, tail: '' };
       actions.push(rec);
       const ch = spawn(process.execPath, [path.join(DIR, 'hub.mjs'), ...argv], { cwd: ROOT, env: { ...process.env, HUB_NO_WEB: '1' } });
       const on = (d) => { rec.tail = (rec.tail + d).slice(-600); }; ch.stdout.on('data', on); ch.stderr.on('data', on);
+      ch.on('error', e => { rec.tail = e.message; rec.done = true; rec.ok = false; rec.endedAt = new Date().toISOString(); });
       ch.on('close', (code) => { rec.done = true; rec.ok = code === 0; rec.endedAt = new Date().toISOString(); });
       send(res, 200, { ok: true });
     });
@@ -347,7 +382,7 @@ async function handle(req, res) {
 export function startWeb() {
   const srv = http.createServer((req, res) => { handle(req, res).catch((e) => { try { send(res, 500, { error: e.message }); } catch {} }); });
   initLogin(ROOT);
-  srv.listen(W.port, '0.0.0.0', () => console.log(`麦田网页：http://localhost:${W.port}/?key=${W.key}`));
-  srv.on('error', (e) => console.error('麦田网页没起来：' + e.message));
+  srv.listen(W.port, W.host || '0.0.0.0', () => console.log(`内容工作台网页：http://localhost:${W.port}/${W.key ? `?key=${W.key}` : ''}`));
+  srv.on('error', (e) => console.error('内容工作台网页没起来：' + e.message));
   return srv;
 }

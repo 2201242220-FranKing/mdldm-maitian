@@ -50,7 +50,7 @@ async function readXiaoe(site, expression) {
   // shortcut: 后台统计接口可能随小鹅通升级变化，字段校验失败时停止同步并保留旧数据。
   return withTab(site.admin, (tab) => evaluate(tab, `(async()=>{
     if (location.origin !== 'https://admin.xiaoe-tech.com' || /login|chooseShop/i.test(location.href))
-      throw new Error(${JSON.stringify('请在麦田专用 Chrome 登录并选择' + site.shopName + '店铺')});
+      throw new Error(${JSON.stringify('请在内容工作台专用 Chrome 登录并选择' + site.shopName + '店铺')});
     const read = async (path, body) => {
       const r = await fetch(path, {method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(15000)});
       if (!r.ok) throw new Error('小鹅通请求失败，请检查专用 Chrome 登录');
@@ -60,7 +60,7 @@ async function readXiaoe(site, expression) {
       return j;
     };
     const identity = await read('/xe.merchant-serve.shop_info.get/1.0.0');
-    if (identity.data?.shop_name !== ${JSON.stringify(site.shopName)}) throw new Error('麦田专用 Chrome 的当前店铺不匹配，原数据未改动');
+    if (identity.data?.shop_name !== ${JSON.stringify(site.shopName)}) throw new Error('内容工作台专用 Chrome 的当前店铺不匹配，原数据未改动');
     ${expression}
   })()`), { wait: 8000 });
 }

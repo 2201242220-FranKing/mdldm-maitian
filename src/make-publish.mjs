@@ -16,14 +16,15 @@ import { join, relative, basename, dirname, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
-import { pluginDir } from './plugin.mjs';
+import { publisherRules, validateMedia, mediaFileErrors, imageExtensions } from './publish-media.mjs';
 // 字段规则来自麦田发布助手（默认是商店版，跟着插件自动更新）
-const { validate } = await import(pathToFileURL(join(pluginDir(), 'lib', 'bundle.js')).href);
+const { validate } = await publisherRules();
 
 const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args.splice(i, 2)[1] : null; };
 const require_ = opt('--require') || process.env.PUBLISH_REQUIRE_TAG || '';   // 每个平台必带的标签（比如账号名），可不填
 const scheduleArg = opt('--schedule');
+const typeArg = opt('--type');
 const [mdPath, dir] = args;
 if (!mdPath || !dir) { console.error('用法：node tools/make-publish.mjs <发布素材.md> <工程目录> [--require 标签] [--schedule "YYYY-MM-DD HH:mm"]'); process.exit(2); }
 
@@ -56,6 +57,9 @@ function splitTopics(body) {
 }
 
 const header = (k) => { const m = md.match(new RegExp(`^> ${k}：\\s*(.+?)\\s*$`, 'm')); return m ? m[1] : null; };
+const typeValue = typeArg || header('发布类型') || 'video';
+const mediaType = ({ 视频: 'video', 图文: 'images' })[typeValue] || typeValue;
+if (!['video', 'images'].includes(mediaType)) { console.error('发布类型必须为 video（视频）或 images（图文）'); process.exit(2); }
 const title = (md.match(/^# (.+)$/m) || [])[1] || basename(dir);
 const episode = +(header('序号') || 0) || undefined;
 
@@ -67,6 +71,7 @@ const files = [];
 const walk = (d) => readdirSync(d).forEach(n => { const p = join(d, n); statSync(p).isDirectory() ? walk(p) : files.push(relative(dir, p).split(sep).join('/')); });
 walk(dir);
 const video = files.includes('成片.mp4') ? '成片.mp4' : null;
+const images = mediaType === 'images' ? files.filter(f => f.startsWith('图片/') && imageExtensions.has(f.slice(f.lastIndexOf('.')).toLowerCase())).sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true })) : [];
 const covers = {};
 for (const [k, n] of [['3x4', 'cover-3x4.png'], ['4x3', 'cover-4x3.png'], ['16x9', 'cover-16x9.jpg']]) if (files.includes(`封面/${n}`)) covers[k] = `封面/${n}`;
 const has = (k) => !!covers[k];
@@ -87,7 +92,7 @@ if ((s = sec('Instagram'))) platforms.instagram = { covers: pick('16x9', '4x3').
 
 // 成片时长（秒）：有 ffprobe 就读出来，给需要时长的平台用
 let durationSec;
-if (video) {
+if (video && mediaType === 'video') {
   try { durationSec = Math.round(+execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', join(dir, video)]).toString().trim()); } catch { /* 没装 ffprobe */ }
 }
 
@@ -98,7 +103,9 @@ const out = {
   name: title,
   source: mdPath.replace(/^.*?\/doc\//, ''),
   ...(files.includes('发布素材.md') ? { source_backup: '发布素材.md' } : {}),
-  video,
+  mediaType,
+  video: mediaType === 'video' ? video : null,
+  ...(mediaType === 'images' ? { images } : {}),
   ...(durationSec ? { durationSec } : {}),
   ...(files.includes('字幕.srt') ? { subtitle: '字幕.srt' } : {}),
   requiredTags: require_ ? [require_] : [],
@@ -121,7 +128,8 @@ if (existsSync(target)) {
 }
 writeFileSync(target, JSON.stringify(out, null, 2) + '\n');
 
-const { errors, warnings } = validate(out, new Set(files));
+const { errors, warnings } = validateMedia(out, new Set(files), validate);
+errors.push(...mediaFileErrors(out, dir));
 // Instagram 网页上传单个文件最大 1GB（PolarisCreationConstants.MAX_FILE_SIZE）：成片太大要先转一版
 if (out.platforms.instagram && !out.platforms.instagram.video && video && statSync(join(dir, video)).size > 1e9) {
   warnings.push(`Instagram：成片 ${(statSync(join(dir, video)).size / 1e9).toFixed(2)}GB，超过网页上传 1GB 上限，先转一版放进工程目录（ffmpeg -i 成片.mp4 -r 30 -c:v h264_videotoolbox -b:v 5000k -c:a aac -b:a 128k -movflags +faststart 成片-ig.mp4），重新生成时会自动给 Instagram 用`);

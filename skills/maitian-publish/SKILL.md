@@ -5,6 +5,10 @@ description: 麦田工作台的发布流程：把一条剪好的成片，整理�
 
 # 麦田 · 发布流程
 
+## 本地新增：小红书图文
+
+本项目现在支持 `mediaType: "video"` 和 `mediaType: "images"`，旧工程默认视频。小红书图文的格式、限制、图片排序及执行方式先读 `docs/image-publishing.md`（相对仓库根目录）。网页“发布”页可选视频/图文，保存计划不上传，用户另点“填写小红书（不发布）”才开始上传。图文只支持小红书与 direct 驱动，不要求成片，不执行视频封面步骤，最终发布仍由用户点击。其余平台保持下面的视频流程，不能把 Article 或口播脚本当图文工程执行。
+
 > 配合 [麦田](https://github.com/CzzzzzzJ/mdldm-maitian)（调度和数据）与 [麦田发布助手](https://chromewebstore.google.com/detail/eaaipbilkhibicihiollecmbpneikpnj)（Chrome 应用商店，各平台填写）使用。
 > 这份是通用版。你的个人偏好（文风、账号名、引流链接、封面模板）写在自己的个人 skill 里，开头写「先读 maitian-publish，再按本文件覆盖」。
 

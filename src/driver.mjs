@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { config } from './feishu.mjs';
 import * as bridge from './bridge.mjs';
 import { pluginDir, pluginInfo } from './plugin.mjs';
+import { mediaType } from './publish-media.mjs';
+import { withXhsImages } from './xhs-images.mjs';
 
 export const mode = (process.env.HUB_DRIVER || config.driver || 'direct');
 export const sleep = bridge.sleep;
@@ -15,7 +17,8 @@ async function load() {
   const dir = pluginDir();
   const pub = await import(pathToFileURL(path.join(dir, 'lib/publish.js')).href);
   const cdp = await import(pathToFileURL(path.join(dir, 'lib/cdp.js')).href);
-  return (lib = { shim, pub, cdp });
+  const common = await import(pathToFileURL(path.join(dir, 'lib/platforms/common.js')).href);
+  return (lib = { shim, pub, cdp, common });
 }
 
 export async function ensure() { if (mode === 'plugin') return bridge.ensureBridge(); const l = await load(); await l.shim.launchChrome(); }
@@ -40,6 +43,15 @@ const tooOld = (id) => { const p = pluginInfo(); return `麦田发布助手 ${p.
 
 // 跑一批平台；onState(st) 在每次状态变化时调用，st = {id, status, logs, tabId}
 export async function runBatch(project, batch, onState, onStall) {
+  if (mediaType(project.data) === 'images') {
+    if (mode === 'plugin') throw new Error('图文发布需要 direct 驱动；开发桥插件暂不支持');
+    if (batch.some(id => id !== 'xhs')) throw new Error('图文暂只支持小红书');
+    const l = await load();
+    return withXhsImages(l, project, config.rootPath, async () => {
+      const states = await l.pub.run(project, { rootPath: config.rootPath, platforms: batch, onChange: onState, shouldStop: () => false });
+      return Object.values(states);
+    });
+  }
   if (mode !== 'plugin') {
     const { pub } = await load();
     const [ok, missing] = split(pub, batch);
